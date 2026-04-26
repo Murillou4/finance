@@ -2434,11 +2434,12 @@
   /* ── Header ── */
   .header {
     background: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
     padding: 0 24px;
     position: sticky;
     top: 0;
     z-index: 50;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+    box-shadow: var(--shadow);
   }
   .header-inner {
     max-width: 1400px;
@@ -2513,7 +2514,7 @@
     background: transparent;
     border-radius: var(--radius-sm);
     font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--header-nav-muted);
     font-weight: 500;
     transition: all var(--transition);
   }
@@ -2527,7 +2528,7 @@
     margin-left: 4px;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--header-nav-muted);
     font-size: 0.78rem;
     font-weight: 600;
     border-radius: var(--radius-xs);
@@ -3000,18 +3001,15 @@
 
   /* ── Categories ── */
   .cat-layout {
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    gap: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
     padding: 20px;
-    align-items: start;
   }
   .cat-chart-wrap {
     max-width: 240px;
     width: 100%;
-    margin: 0;
-    position: sticky;
-    top: 80px;
+    margin: 0 auto;
   }
   .cat-list {
     display: flex;
@@ -3021,7 +3019,7 @@
   }
   .cat-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
   .cat-grid-empty {
@@ -3147,14 +3145,6 @@
     }
     .stat-card-hero {
       grid-column: span 2;
-    }
-    .cat-layout {
-      grid-template-columns: 1fr;
-    }
-    .cat-chart-wrap {
-      max-width: 240px;
-      margin: 0 auto 12px;
-      position: static;
     }
   }
   @media (max-width: 900px) {

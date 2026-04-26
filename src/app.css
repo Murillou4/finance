@@ -25,12 +25,14 @@
   --info-text: #1d4ed8;
   --info-banner-bg: #eff6ff;
 
-  --header-bg: linear-gradient(135deg, #0c1220 0%, #162032 50%, #1a2640 100%);
-  --header-text: #ffffff;
-  --header-text-muted: rgba(255, 255, 255, 0.75);
-  --header-control-bg: rgba(255, 255, 255, 0.06);
-  --header-control-border: rgba(255, 255, 255, 0.12);
-  --header-control-hover: rgba(255, 255, 255, 0.14);
+  --header-bg: #ffffff;
+  --header-border: #e8ecf4;
+  --header-text: #0f172a;
+  --header-text-muted: #5b6580;
+  --header-control-bg: #f4f6fb;
+  --header-control-border: #e8ecf4;
+  --header-control-hover: #eef1f7;
+  --header-nav-muted: #9ca3b8;
 
   --badge-debit-bg: #dbeafe;
   --badge-debit-color: #1d4ed8;
@@ -77,12 +79,14 @@
   --info-text: #a5b4fc;
   --info-banner-bg: rgba(129, 140, 248, 0.1);
 
-  --header-bg: linear-gradient(135deg, #050912 0%, #0b1220 50%, #131b2e 100%);
+  --header-bg: #0b1220;
+  --header-border: #1c2540;
   --header-text: #ffffff;
   --header-text-muted: rgba(255, 255, 255, 0.7);
   --header-control-bg: rgba(255, 255, 255, 0.05);
   --header-control-border: rgba(255, 255, 255, 0.08);
   --header-control-hover: rgba(255, 255, 255, 0.12);
+  --header-nav-muted: rgba(255, 255, 255, 0.55);
 
   --badge-debit-bg: rgba(59, 130, 246, 0.18);
   --badge-debit-color: #93c5fd;
