@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Chart from "$lib/Chart.svelte";
+  import Modal from "$lib/Modal.svelte";
   import {
     createEmptyMonthSummary,
     FinanceDataStore,
@@ -22,6 +23,11 @@
     "Dezembro",
   ];
 
+  const MONTHS_SHORT = [
+    "jan", "fev", "mar", "abr", "mai", "jun",
+    "jul", "ago", "set", "out", "nov", "dez",
+  ];
+
   const initialDate = new Date();
 
   let finance: FinanceDataStore | null = null;
@@ -31,8 +37,16 @@
       initialDate.getFullYear(),
     ),
   );
+  let prev = $state<MonthSummary>(
+    createEmptyMonthSummary(
+      initialDate.getMonth() + 1,
+      initialDate.getFullYear(),
+    ),
+  );
   let form = $state<Record<string, string>>({});
 
+  let theme = $state<"light" | "dark">("light");
+  let activeTab = $state<"fixed" | "monthly" | "credit">("fixed");
   let showAddFixed = $state(false);
   let showAddMonthly = $state(false);
   let showAddCreditCard = $state(false);
@@ -43,7 +57,6 @@
   let showCopyFixed = $state(false);
   let copyFixedSubmitting = $state(false);
   let showAllCategories = $state(false);
-  let paymentModal = $state<{ code: string; type: string } | null>(null);
   let editPayment = $state<{
     id: number;
     table: string;
@@ -56,6 +69,12 @@
   let editIncome = $state<any>(null);
   let editInvestment = $state<any>(null);
 
+  type SortField = "name" | "value" | "date" | "installments";
+  type SortDir = "asc" | "desc";
+  let sortFixed = $state<{ field: SortField; dir: SortDir }>({ field: "name", dir: "asc" });
+  let sortMonthly = $state<{ field: SortField; dir: SortDir }>({ field: "date", dir: "asc" });
+  let sortCredit = $state<{ field: SortField; dir: SortDir }>({ field: "date", dir: "asc" });
+
   let draggingExpense = $state<any>(null);
   let draggingSource = $state<string>("");
   let moveForm = $state<HTMLFormElement | null>(null);
@@ -66,8 +85,27 @@
       data.byCategory.some((category) => category.expected > 0),
   );
 
+  let deltaExpenses = $derived(computeDelta(data.totalExpenses, prev.totalExpenses));
+  let deltaIncome = $derived(computeDelta(data.totalIncome, prev.totalIncome));
+  let deltaBalance = $derived(computeDelta(data.balance, prev.balance));
+  let deltaInvestments = $derived(computeDelta(data.totalInvestments, prev.totalInvestments));
+  let prevLabel = $derived(MONTHS_SHORT[((data.month - 2 + 12) % 12)]);
+
+  let sortedFixed = $derived(sortRows(data.fixed, sortFixed));
+  let sortedMonthly = $derived(sortRows(data.monthly, sortMonthly));
+  let sortedCredit = $derived(sortRows(data.creditCard, sortCredit));
+
   onMount(() => {
     finance = new FinanceDataStore();
+
+    const stored = localStorage.getItem("finance:theme");
+    if (stored === "dark" || stored === "light") {
+      theme = stored;
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      theme = "dark";
+    }
+    applyTheme(theme);
+
     const current = getUrlMonthYear();
     refreshData(current.month, current.year);
 
@@ -83,16 +121,83 @@
     };
   });
 
-  function getPreviousMonth(month: number, year: number) {
-    if (month === 1) {
-      return { month: 12, year: year - 1 };
-    }
+  function applyTheme(value: "light" | "dark") {
+    if (typeof document === "undefined") return;
+    document.documentElement.setAttribute("data-theme", value);
+  }
 
+  function toggleTheme() {
+    theme = theme === "dark" ? "light" : "dark";
+    applyTheme(theme);
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("finance:theme", theme);
+    }
+  }
+
+  function goToToday() {
+    const now = new Date();
+    const m = now.getMonth() + 1;
+    const y = now.getFullYear();
+    if (m === data.month && y === data.year) return;
+    setUrlMonthYear(m, y);
+    refreshData(m, y);
+  }
+
+  function computeDelta(current: number, previous: number) {
+    const diff = current - previous;
+    if (previous === 0 && current === 0) return { diff: 0, pct: 0, has: false };
+    if (previous === 0) return { diff, pct: 100, has: true };
+    return { diff, pct: (diff / Math.abs(previous)) * 100, has: true };
+  }
+
+  function toggleSort(
+    sortRef: { field: SortField; dir: SortDir },
+    field: SortField,
+  ): { field: SortField; dir: SortDir } {
+    if (sortRef.field === field) {
+      return { field, dir: sortRef.dir === "asc" ? "desc" : "asc" };
+    }
+    return { field, dir: "asc" };
+  }
+
+  function parseDateForSort(raw: string | null | undefined): number {
+    if (!raw) return Number.MAX_SAFE_INTEGER;
+    const match = raw.match(/^(\d{1,2})\/(\d{1,2})/);
+    if (!match) return Number.MAX_SAFE_INTEGER;
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    return month * 100 + day;
+  }
+
+  function sortRows<T extends { name?: string; value?: number; date?: string; total_installments?: number }>(
+    rows: T[],
+    sort: { field: SortField; dir: SortDir },
+  ): T[] {
+    const out = [...rows];
+    const dirMul = sort.dir === "asc" ? 1 : -1;
+    out.sort((a, b) => {
+      let cmp = 0;
+      if (sort.field === "name") {
+        cmp = (a.name || "").localeCompare(b.name || "", "pt-BR");
+      } else if (sort.field === "value") {
+        cmp = (a.value || 0) - (b.value || 0);
+      } else if (sort.field === "date") {
+        cmp = parseDateForSort(a.date) - parseDateForSort(b.date);
+      } else if (sort.field === "installments") {
+        cmp = (a.total_installments || 0) - (b.total_installments || 0);
+      }
+      return cmp * dirMul;
+    });
+    return out;
+  }
+
+  function getPreviousMonthOf(month: number, year: number) {
+    if (month === 1) return { month: 12, year: year - 1 };
     return { month: month - 1, year };
   }
 
   function createCopyFixedForm() {
-    const previous = getPreviousMonth(data.month, data.year);
+    const previous = getPreviousMonthOf(data.month, data.year);
 
     return {
       source_month: previous.month,
@@ -619,7 +724,10 @@
   }
 
   function refreshData(month = data.month, year = data.year) {
-    data = getFinance().getMonthSummary(month, year);
+    const store = getFinance();
+    data = store.getMonthSummary(month, year);
+    const previous = getPreviousMonthOf(month, year);
+    prev = store.getMonthSummary(previous.month, previous.year);
   }
 
   function getUrlMonthYear() {
@@ -726,6 +834,14 @@
   <div class="header-inner">
     <h1 class="logo">Finance</h1>
     <div class="month-nav">
+      <button
+        class="header-icon-btn"
+        title={theme === "dark" ? "Tema claro" : "Tema escuro"}
+        aria-label="Alternar tema"
+        onclick={toggleTheme}
+      >
+        {theme === "dark" ? "☀" : "☾"}
+      </button>
       <button class="header-action" onclick={() => (showImport = true)}
         >Importar Dados</button
       >
@@ -733,9 +849,10 @@
         >Backup</button
       >
       <div class="month-selector">
-        <button class="btn-nav" onclick={() => navigateMonth(-1)}>&larr;</button>
+        <button class="btn-nav" onclick={() => navigateMonth(-1)} aria-label="Mês anterior">&larr;</button>
         <span class="month-label">{MONTHS[data.month - 1]} {data.year}</span>
-        <button class="btn-nav" onclick={() => navigateMonth(1)}>&rarr;</button>
+        <button class="btn-nav" onclick={() => navigateMonth(1)} aria-label="Próximo mês">&rarr;</button>
+        <button class="btn-today" onclick={goToToday} title="Voltar para o mês atual">Hoje</button>
       </div>
     </div>
   </div>
@@ -763,70 +880,172 @@
 
   <!-- Top Stats -->
   <div class="stats-bar">
-    <div class="stat-card" style="--accent: var(--danger)">
-      <span class="stat-label">Total de Gastos</span>
-      <span class="stat-value negative">{fmt(data.totalExpenses)}</span>
-    </div>
-    <div class="stat-card" style="--accent: var(--success)">
-      <span class="stat-label">Entradas</span>
-      <span class="stat-value positive">{fmt(data.totalIncome)}</span>
-    </div>
-    <div class="stat-card" style="--accent: {data.balance >= 0 ? 'var(--success)' : 'var(--danger)'}">
-      <span class="stat-label">Saldo</span>
+    <div class="stat-card stat-card-hero" style="--accent: {data.balance >= 0 ? 'var(--success)' : 'var(--danger)'}">
+      <div class="stat-card-head">
+        <span class="stat-icon" aria-hidden="true">{data.balance >= 0 ? "▲" : "▼"}</span>
+        <span class="stat-label">Saldo do mês</span>
+      </div>
       <span
-        class="stat-value"
+        class="stat-value stat-value-hero"
         class:positive={data.balance >= 0}
         class:negative={data.balance < 0}
       >
         {fmt(data.balance)}
       </span>
+      {#if deltaBalance.has}
+        <span
+          class="stat-delta"
+          class:delta-up={deltaBalance.diff > 0}
+          class:delta-down={deltaBalance.diff < 0}
+        >
+          {deltaBalance.diff >= 0 ? "↑" : "↓"} {Math.abs(deltaBalance.pct).toFixed(0)}% vs {prevLabel}
+        </span>
+      {/if}
     </div>
+
+    <div class="stat-card" style="--accent: var(--success)">
+      <div class="stat-card-head">
+        <span class="stat-icon" aria-hidden="true">+</span>
+        <span class="stat-label">Entradas</span>
+      </div>
+      <span class="stat-value positive">{fmt(data.totalIncome)}</span>
+      {#if deltaIncome.has}
+        <span
+          class="stat-delta"
+          class:delta-up={deltaIncome.diff > 0}
+          class:delta-down={deltaIncome.diff < 0}
+        >
+          {deltaIncome.diff >= 0 ? "↑" : "↓"} {Math.abs(deltaIncome.pct).toFixed(0)}% vs {prevLabel}
+        </span>
+      {/if}
+    </div>
+
+    <div class="stat-card" style="--accent: var(--danger)">
+      <div class="stat-card-head">
+        <span class="stat-icon" aria-hidden="true">−</span>
+        <span class="stat-label">Total de Gastos</span>
+      </div>
+      <span class="stat-value negative">{fmt(data.totalExpenses)}</span>
+      {#if deltaExpenses.has}
+        <span
+          class="stat-delta"
+          class:delta-up={deltaExpenses.diff < 0}
+          class:delta-down={deltaExpenses.diff > 0}
+        >
+          {deltaExpenses.diff >= 0 ? "↑" : "↓"} {Math.abs(deltaExpenses.pct).toFixed(0)}% vs {prevLabel}
+        </span>
+      {/if}
+    </div>
+
     <div class="stat-card" style="--accent: var(--info)">
-      <span class="stat-label">Investimentos</span>
+      <div class="stat-card-head">
+        <span class="stat-icon" aria-hidden="true">◇</span>
+        <span class="stat-label">Investimentos</span>
+      </div>
       <span class="stat-value" style="color: var(--info)">{fmt(data.totalInvestments)}</span>
+      {#if deltaInvestments.has}
+        <span
+          class="stat-delta"
+          class:delta-up={deltaInvestments.diff > 0}
+          class:delta-down={deltaInvestments.diff < 0}
+        >
+          {deltaInvestments.diff >= 0 ? "↑" : "↓"} {Math.abs(deltaInvestments.pct).toFixed(0)}% vs {prevLabel}
+        </span>
+      {/if}
     </div>
   </div>
 
   <div class="dashboard-grid">
     <!-- LEFT COLUMN -->
     <div class="col">
-      <!-- Fixed Expenses -->
+      <!-- Tabbed expense card: Fixos / Mensais / Crédito -->
+      <div class="card expenses-card">
+        <div class="tab-bar" role="tablist">
+          <button
+            class="tab-btn"
+            class:active={activeTab === "fixed"}
+            role="tab"
+            aria-selected={activeTab === "fixed"}
+            onclick={() => (activeTab = "fixed")}
+          >
+            <span class="tab-label">Fixos</span>
+            <span class="tab-total">{fmt(data.totalFixed)}</span>
+          </button>
+          <button
+            class="tab-btn"
+            class:active={activeTab === "monthly"}
+            role="tab"
+            aria-selected={activeTab === "monthly"}
+            onclick={() => (activeTab = "monthly")}
+          >
+            <span class="tab-label">Mensais</span>
+            <span class="tab-total">{fmt(data.totalMonthly)}</span>
+          </button>
+          <button
+            class="tab-btn"
+            class:active={activeTab === "credit"}
+            role="tab"
+            aria-selected={activeTab === "credit"}
+            onclick={() => (activeTab = "credit")}
+          >
+            <span class="tab-label">Cartão</span>
+            <span class="tab-total">{fmt(data.totalCreditCard)}</span>
+          </button>
+          <div class="tab-actions">
+            {#if activeTab === "fixed"}
+              <button class="btn btn-sm" onclick={openCopyFixed}>Copiar</button>
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => (showAddFixed = true)}>+ Adicionar</button
+              >
+            {:else if activeTab === "monthly"}
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => (showAddMonthly = true)}>+ Adicionar</button
+              >
+            {:else}
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => openAddCreditCard()}>+ Adicionar</button
+              >
+            {/if}
+          </div>
+        </div>
+
+      {#if activeTab === "fixed"}
       <div
-        class="card"
+        class="tab-pane"
         role="region"
         aria-label="Despesas Fixas"
         ondragover={handleDragOver}
         ondrop={(e) => handleDrop(e, "fixed")}
         class:drag-over-target={draggingSource && draggingSource !== "fixed"}
       >
-        <div class="card-header">
-          <span
-            >Fixos <span class="header-total">{fmt(data.totalFixed)}</span
-            ></span
-          >
-          <div class="card-actions">
-            <button class="btn btn-sm" onclick={openCopyFixed}>Copiar</button>
-            <button
-              class="btn btn-sm btn-primary"
-              onclick={() => (showAddFixed = true)}>+ Adicionar</button
-            >
-          </div>
-        </div>
         <div class="card-body">
+          {#if sortedFixed.length === 0}
+            <div class="empty-state">
+              <p>Nenhuma despesa fixa neste mês.</p>
+              <button class="btn btn-sm" onclick={openCopyFixed}>Copiar de outro mês</button>
+            </div>
+          {:else}
           <table>
             <thead>
               <tr>
                 <th>Pago</th>
-                <th>Nome</th>
+                <th class="sortable" class:sort-active={sortFixed.field === "name"} onclick={() => (sortFixed = toggleSort(sortFixed, "name"))}>
+                  Nome<span class="sort-arrow">{sortFixed.field === "name" ? (sortFixed.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
                 <th>Tipo</th>
                 <th>Categoria</th>
-                <th>Valor</th>
+                <th class="sortable" class:sort-active={sortFixed.field === "value"} onclick={() => (sortFixed = toggleSort(sortFixed, "value"))}>
+                  Valor<span class="sort-arrow">{sortFixed.field === "value" ? (sortFixed.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
                 <th>Pag.</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {#each data.fixed as expense}
+              {#each sortedFixed as expense}
                 <tr
                   draggable="true"
                   ondragstart={(e) => handleDragStart(e, expense, "fixed")}
@@ -919,44 +1138,47 @@
               {/each}
             </tbody>
           </table>
+          {/if}
         </div>
       </div>
+      {/if}
 
-      <!-- Monthly Expenses -->
+      {#if activeTab === "monthly"}
       <div
-        class="card"
+        class="tab-pane"
         role="region"
         aria-label="Despesas Mensais"
         ondragover={handleDragOver}
         ondrop={(e) => handleDrop(e, "monthly")}
         class:drag-over-target={draggingSource && draggingSource !== "monthly"}
       >
-        <div class="card-header">
-          <span
-            >Gastos do Mês <span class="header-total"
-              >{fmt(data.totalMonthly)}</span
-            ></span
-          >
-          <button
-            class="btn btn-sm btn-primary"
-            onclick={() => (showAddMonthly = true)}>+ Adicionar</button
-          >
-        </div>
         <div class="card-body">
+          {#if sortedMonthly.length === 0}
+            <div class="empty-state">
+              <p>Nenhum gasto registrado neste mês.</p>
+              <button class="btn btn-sm btn-primary" onclick={() => (showAddMonthly = true)}>+ Adicionar primeiro gasto</button>
+            </div>
+          {:else}
           <table>
             <thead>
               <tr>
                 <th>Pago</th>
-                <th>Nome</th>
-                <th>Data</th>
+                <th class="sortable" class:sort-active={sortMonthly.field === "name"} onclick={() => (sortMonthly = toggleSort(sortMonthly, "name"))}>
+                  Nome<span class="sort-arrow">{sortMonthly.field === "name" ? (sortMonthly.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
+                <th class="sortable" class:sort-active={sortMonthly.field === "date"} onclick={() => (sortMonthly = toggleSort(sortMonthly, "date"))}>
+                  Data<span class="sort-arrow">{sortMonthly.field === "date" ? (sortMonthly.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
                 <th>Categoria</th>
-                <th>Valor</th>
+                <th class="sortable" class:sort-active={sortMonthly.field === "value"} onclick={() => (sortMonthly = toggleSort(sortMonthly, "value"))}>
+                  Valor<span class="sort-arrow">{sortMonthly.field === "value" ? (sortMonthly.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
                 <th>Pag.</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {#each data.monthly as expense}
+              {#each sortedMonthly as expense}
                 <tr
                   draggable="true"
                   ondragstart={(e) => handleDragStart(e, expense, "monthly")}
@@ -1041,45 +1263,50 @@
               {/each}
             </tbody>
           </table>
+          {/if}
         </div>
       </div>
+      {/if}
 
-      <!-- Credit Card -->
+      {#if activeTab === "credit"}
       <div
-        class="card"
+        class="tab-pane"
         role="region"
         aria-label="Cartão de Crédito"
         ondragover={handleDragOver}
         ondrop={(e) => handleDrop(e, "creditCard")}
         class:drag-over-target={draggingSource && draggingSource !== "creditCard"}
       >
-        <div class="card-header">
-          <span
-            >Cartão de Crédito <span class="header-total"
-              >{fmt(data.totalCreditCard)}</span
-            ></span
-          >
-          <button
-            class="btn btn-sm btn-primary"
-            onclick={() => openAddCreditCard()}>+ Adicionar</button
-          >
-        </div>
         <div class="card-body">
+          {#if sortedCredit.length === 0}
+            <div class="empty-state">
+              <p>Nenhuma compra no cartão neste mês.</p>
+              <button class="btn btn-sm btn-primary" onclick={() => openAddCreditCard()}>+ Adicionar compra</button>
+            </div>
+          {:else}
           <table>
             <thead>
               <tr>
                 <th>Pago</th>
-                <th>Nome</th>
-                <th>Parcelas</th>
-                <th>Data</th>
+                <th class="sortable" class:sort-active={sortCredit.field === "name"} onclick={() => (sortCredit = toggleSort(sortCredit, "name"))}>
+                  Nome<span class="sort-arrow">{sortCredit.field === "name" ? (sortCredit.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
+                <th class="sortable" class:sort-active={sortCredit.field === "installments"} onclick={() => (sortCredit = toggleSort(sortCredit, "installments"))}>
+                  Parcelas<span class="sort-arrow">{sortCredit.field === "installments" ? (sortCredit.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
+                <th class="sortable" class:sort-active={sortCredit.field === "date"} onclick={() => (sortCredit = toggleSort(sortCredit, "date"))}>
+                  Data<span class="sort-arrow">{sortCredit.field === "date" ? (sortCredit.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
                 <th>Categoria</th>
-                <th>Valor</th>
+                <th class="sortable" class:sort-active={sortCredit.field === "value"} onclick={() => (sortCredit = toggleSort(sortCredit, "value"))}>
+                  Valor<span class="sort-arrow">{sortCredit.field === "value" ? (sortCredit.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                </th>
                 <th>Pag.</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {#each data.creditCard as expense}
+              {#each sortedCredit as expense}
                 <tr>
                   <td>
                     <form method="POST" action="?/updateCreditCard" use:submitEnhance>
@@ -1166,8 +1393,11 @@
               {/each}
             </tbody>
           </table>
+          {/if}
         </div>
       </div>
+      {/if}
+      </div><!-- /.expenses-card -->
     </div>
 
     <!-- RIGHT COLUMN -->
@@ -1320,12 +1550,13 @@
       <!-- Categories (unified: chart + breakdown) -->
       <div class="card">
         <div class="card-header">Categorias</div>
-        <div class="card-body" style="padding: 20px;">
+        <div class="card-body cat-layout">
           <!-- Chart -->
           <div class="cat-chart-wrap">
             <Chart categories={data.byCategory.filter((c) => c.spent > 0)} />
           </div>
 
+          <div class="cat-list">
           <!-- Active categories (with spending or budget) -->
           <div class="cat-grid">
             {#each data.byCategory.filter(c => c.spent > 0 || c.expected > 0) as cat}
@@ -1376,12 +1607,13 @@
 
           <!-- Toggle for empty categories -->
           {#if data.byCategory.some(c => c.spent === 0 && c.expected === 0)}
+            <div class="cat-divider"></div>
             <button class="cat-toggle" onclick={() => (showAllCategories = !showAllCategories)}>
               {showAllCategories ? 'Ocultar' : 'Mostrar'} categorias sem gastos ({data.byCategory.filter(c => c.spent === 0 && c.expected === 0).length})
             </button>
 
             {#if showAllCategories}
-              <div class="cat-grid" style="margin-top: 10px;">
+              <div class="cat-grid cat-grid-empty">
                 {#each data.byCategory.filter(c => c.spent === 0 && c.expected === 0) as cat}
                   <div class="cat-card cat-card-empty">
                     <div class="cat-card-top">
@@ -1415,6 +1647,7 @@
               </div>
             {/if}
           {/if}
+          </div><!-- /.cat-list -->
         </div>
       </div>
     </div>
@@ -1422,19 +1655,7 @@
 </main>
 
 <!-- ADD FIXED MODAL -->
-{#if showAddFixed}
-  <div
-    class="modal-overlay"
-    onclick={() => (showAddFixed = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Nova Despesa Fixa</span>
-        <button class="btn-icon" onclick={() => (showAddFixed = false)}
-          >✕</button
-        >
-      </div>
+<Modal open={showAddFixed} title="Nova Despesa Fixa" onClose={() => (showAddFixed = false)}>
       <form method="POST" action="?/addFixed" use:quickEnhance>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -1501,22 +1722,10 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- BACKUP MODAL -->
-{#if showBackup}
-  <div
-    class="modal-overlay"
-    onclick={() => (showBackup = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Backup Completo</span>
-        <button class="btn-icon" onclick={() => (showBackup = false)}>✕</button>
-      </div>
+<Modal open={showBackup} title="Backup Completo" onClose={() => (showBackup = false)}>
       <div class="modal-body backup-stack">
         <section class="backup-section">
           <div class="backup-copy">
@@ -1556,24 +1765,10 @@
           </form>
         </section>
       </div>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- COPY FIXED MODAL -->
-{#if showCopyFixed}
-  <div
-    class="modal-overlay"
-    onclick={() => (showCopyFixed = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Copiar Fixos</span>
-        <button class="btn-icon" onclick={() => (showCopyFixed = false)}
-          >✕</button
-        >
-      </div>
+<Modal open={showCopyFixed} title="Copiar Fixos" onClose={() => (showCopyFixed = false)}>
       <form method="POST" action="?/copyFixedToMonth" use:enhanceCopyFixed>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -1624,24 +1819,10 @@
           </button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- ADD MONTHLY MODAL -->
-{#if showAddMonthly}
-  <div
-    class="modal-overlay"
-    onclick={() => (showAddMonthly = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Novo Gasto do Mês</span>
-        <button class="btn-icon" onclick={() => (showAddMonthly = false)}
-          >✕</button
-        >
-      </div>
+<Modal open={showAddMonthly} title="Novo Gasto do Mês" onClose={() => (showAddMonthly = false)}>
       <form method="POST" action="?/addMonthly" use:quickEnhance>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -1712,24 +1893,10 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- ADD CREDIT CARD MODAL -->
-{#if showAddCreditCard}
-  <div
-    class="modal-overlay"
-    onclick={() => (showAddCreditCard = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Nova Despesa Cartão de Crédito</span>
-        <button class="btn-icon" onclick={() => (showAddCreditCard = false)}
-          >✕</button
-        >
-      </div>
+<Modal open={showAddCreditCard} title="Nova Despesa Cartão de Crédito" onClose={() => (showAddCreditCard = false)}>
       <form method="POST" action="?/addCreditCard" use:quickEnhance>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -1842,24 +2009,10 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- ADD INCOME MODAL -->
-{#if showAddIncome}
-  <div
-    class="modal-overlay"
-    onclick={() => (showAddIncome = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Nova Entrada</span>
-        <button class="btn-icon" onclick={() => (showAddIncome = false)}
-          >✕</button
-        >
-      </div>
+<Modal open={showAddIncome} title="Nova Entrada" onClose={() => (showAddIncome = false)}>
       <form method="POST" action="?/addIncome" use:quickEnhance>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -1889,24 +2042,10 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- ADD INVESTMENT MODAL -->
-{#if showAddInvestment}
-  <div
-    class="modal-overlay"
-    onclick={() => (showAddInvestment = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Novo Investimento</span>
-        <button class="btn-icon" onclick={() => (showAddInvestment = false)}
-          >✕</button
-        >
-      </div>
+<Modal open={showAddInvestment} title="Novo Investimento" onClose={() => (showAddInvestment = false)}>
       <form method="POST" action="?/addInvestment" use:quickEnhance>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -1936,22 +2075,11 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <!-- EDIT PAYMENT CODE MODAL -->
-{#if editPayment}
-  <div
-    class="modal-overlay"
-    onclick={() => (editPayment = null)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Adicionar Código de Pagamento</span>
-        <button class="btn-icon" onclick={() => (editPayment = null)}>✕</button>
-      </div>
+<Modal open={editPayment !== null} title="Adicionar Código de Pagamento" onClose={() => (editPayment = null)}>
+  {#if editPayment}
       <form method="POST" action="?/update{editPayment.table}" use:quickEnhance>
         <input type="hidden" name="id" value={editPayment.id} />
         <div class="modal-body">
@@ -1986,22 +2114,12 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <!-- EDIT FIXED MODAL -->
-{#if editFixed}
-  <div
-    class="modal-overlay"
-    onclick={() => (editFixed = null)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Editar Despesa Fixa</span>
-        <button class="btn-icon" onclick={() => (editFixed = null)}>✕</button>
-      </div>
+<Modal open={editFixed !== null} title="Editar Despesa Fixa" onClose={() => (editFixed = null)}>
+  {#if editFixed}
       <form method="POST" action="?/updateFixed" use:quickEnhance>
         <input type="hidden" name="id" value={editFixed.id} />
         <div class="modal-body">
@@ -2063,22 +2181,12 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <!-- EDIT MONTHLY MODAL -->
-{#if editMonthly}
-  <div
-    class="modal-overlay"
-    onclick={() => (editMonthly = null)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Editar Gasto Mensal</span>
-        <button class="btn-icon" onclick={() => (editMonthly = null)}>✕</button>
-      </div>
+<Modal open={editMonthly !== null} title="Editar Gasto Mensal" onClose={() => (editMonthly = null)}>
+  {#if editMonthly}
       <form method="POST" action="?/updateMonthly" use:quickEnhance>
         <input type="hidden" name="id" value={editMonthly.id} />
         <div class="modal-body">
@@ -2137,24 +2245,12 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <!-- EDIT CREDIT CARD MODAL -->
-{#if editCreditCard}
-  <div
-    class="modal-overlay"
-    onclick={() => (editCreditCard = null)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Editar Gasto no Cartão</span>
-        <button class="btn-icon" onclick={() => (editCreditCard = null)}
-          >✕</button
-        >
-      </div>
+<Modal open={editCreditCard !== null} title="Editar Gasto no Cartão" onClose={() => (editCreditCard = null)}>
+  {#if editCreditCard}
       <form method="POST" action="?/updateCreditCard" use:quickEnhance>
         <input type="hidden" name="id" value={editCreditCard.id} />
         <div class="modal-body">
@@ -2215,22 +2311,12 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <!-- EDIT INCOME MODAL -->
-{#if editIncome}
-  <div
-    class="modal-overlay"
-    onclick={() => (editIncome = null)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Editar Entrada</span>
-        <button class="btn-icon" onclick={() => (editIncome = null)}>✕</button>
-      </div>
+<Modal open={editIncome !== null} title="Editar Entrada" onClose={() => (editIncome = null)}>
+  {#if editIncome}
       <form method="POST" action="?/updateIncome" use:quickEnhance>
         <input type="hidden" name="id" value={editIncome.id} />
         <div class="modal-body">
@@ -2264,24 +2350,12 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <!-- EDIT INVESTMENT MODAL -->
-{#if editInvestment}
-  <div
-    class="modal-overlay"
-    onclick={() => (editInvestment = null)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Editar Investimento</span>
-        <button class="btn-icon" onclick={() => (editInvestment = null)}
-          >✕</button
-        >
-      </div>
+<Modal open={editInvestment !== null} title="Editar Investimento" onClose={() => (editInvestment = null)}>
+  {#if editInvestment}
       <form method="POST" action="?/updateInvestment" use:quickEnhance>
         <input type="hidden" name="id" value={editInvestment.id} />
         <div class="modal-body">
@@ -2317,22 +2391,11 @@
           <button type="submit" class="btn btn-primary">Salvar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <!-- IMPORT MODAL -->
-{#if showImport}
-  <div
-    class="modal-overlay"
-    onclick={() => (showImport = false)}
-    role="presentation"
-  >
-    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-      <div class="modal-header">
-        <span>Importar Dados</span>
-        <button class="btn-icon" onclick={() => (showImport = false)}>✕</button>
-      </div>
+<Modal open={showImport} title="Importar Dados" onClose={() => (showImport = false)}>
       <form method="POST" action="?/importData" use:quickEnhance>
         <input type="hidden" name="_month" value={data.month} />
         <input type="hidden" name="_year" value={data.year} />
@@ -2365,14 +2428,12 @@
           <button type="submit" class="btn btn-primary">Importar</button>
         </div>
       </form>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <style>
-  /* ── Header (dark, glassmorphism) ── */
+  /* ── Header ── */
   .header {
-    background: linear-gradient(135deg, #0c1220 0%, #162032 50%, #1a2640 100%);
+    background: var(--header-bg);
     padding: 0 24px;
     position: sticky;
     top: 0;
@@ -2390,54 +2451,61 @@
   .logo {
     font-size: 1.3rem;
     font-weight: 800;
-    color: #fff;
+    color: var(--header-text);
     letter-spacing: -0.03em;
-    background: linear-gradient(135deg, #fff 0%, #e2e8f0 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
   }
   .month-nav {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
+  }
+  .header-icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--header-control-border);
+    background: var(--header-control-bg);
+    color: var(--header-text);
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+  .header-icon-btn:hover {
+    background: var(--header-control-hover);
+    transform: translateY(-1px);
   }
   .header-action {
     padding: 7px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--header-control-border);
     border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(8px);
+    background: var(--header-control-bg);
     font-size: 0.85rem;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.75);
+    color: var(--header-text-muted);
     cursor: pointer;
     transition: all var(--transition);
     font-family: inherit;
   }
   .header-action:hover {
-    background: rgba(255, 255, 255, 0.14);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.25);
+    background: var(--header-control-hover);
+    color: var(--header-text);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  }
-  .header-action:active {
-    transform: translateY(0);
   }
   .month-selector {
     display: flex;
     align-items: center;
     gap: 2px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--header-control-bg);
+    border: 1px solid var(--header-control-border);
     border-radius: 12px;
     padding: 3px;
-    backdrop-filter: blur(8px);
   }
   .btn-nav {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2445,25 +2513,39 @@
     background: transparent;
     border-radius: var(--radius-sm);
     font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.55);
     font-weight: 500;
     transition: all var(--transition);
   }
   .btn-nav:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    transform: scale(1.05);
+    background: var(--header-control-hover);
+    color: var(--header-text);
   }
-  .btn-nav:active {
-    transform: scale(0.95);
+  .btn-today {
+    height: 28px;
+    padding: 0 12px;
+    margin-left: 4px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: var(--radius-xs);
+    transition: all var(--transition);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .btn-today:hover {
+    background: var(--header-control-hover);
+    color: var(--header-text);
   }
   .month-label {
     font-weight: 600;
     font-size: 0.92rem;
-    min-width: 150px;
+    min-width: 140px;
     text-align: center;
     padding: 0 8px;
-    color: #fff;
+    color: var(--header-text);
     letter-spacing: 0.01em;
   }
 
@@ -2482,40 +2564,42 @@
   }
   .banner-success {
     background: var(--success-light);
-    color: #166534;
-    border-color: rgba(16, 185, 129, 0.18);
+    color: var(--success-text);
+    border-color: rgba(16, 185, 129, 0.22);
   }
   .banner-inline {
     margin-bottom: 14px;
   }
   .banner-error {
     background: var(--danger-light);
-    color: #b91c1c;
-    border-color: rgba(239, 68, 68, 0.18);
+    color: var(--danger-text);
+    border-color: rgba(239, 68, 68, 0.22);
   }
   .banner-info {
-    background: #eff6ff;
-    color: #1d4ed8;
-    border-color: rgba(59, 130, 246, 0.18);
+    background: var(--info-banner-bg);
+    color: var(--info-text);
+    border-color: rgba(99, 102, 241, 0.22);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
   }
   .banner-action {
-    border: 1px solid rgba(29, 78, 216, 0.2);
+    border: 1px solid rgba(99, 102, 241, 0.3);
     border-radius: var(--radius-xs);
-    background: #fff;
-    color: #1d4ed8;
+    background: var(--surface);
+    color: var(--info-text);
     font: inherit;
     font-size: 0.85rem;
     font-weight: 700;
     padding: 7px 10px;
     cursor: pointer;
   }
+
+  /* ── Stats bar ── */
   .stats-bar {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: 1.5fr 1fr 1fr 1fr;
     gap: 16px;
     margin-bottom: 28px;
   }
@@ -2523,10 +2607,10 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 20px 22px;
+    padding: 18px 20px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     box-shadow: var(--shadow);
     transition: all var(--transition-slow);
     position: relative;
@@ -2540,8 +2624,7 @@
     right: 0;
     height: 3px;
     background: var(--accent, var(--primary));
-    border-radius: var(--radius) var(--radius) 0 0;
-    opacity: 0.6;
+    opacity: 0.7;
     transition: opacity var(--transition);
   }
   .stat-card:hover {
@@ -2551,6 +2634,44 @@
   .stat-card:hover::before {
     opacity: 1;
   }
+  .stat-card-hero {
+    padding: 22px 26px;
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-hover) 100%);
+  }
+  .stat-card-hero::before {
+    height: 4px;
+  }
+  .stat-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .stat-icon {
+    display: inline-flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent, var(--primary));
+    background: color-mix(in srgb, var(--accent, var(--primary)) 12%, transparent);
+  }
+  .stat-value-hero {
+    font-size: 2.1rem;
+    margin-top: 2px;
+  }
+  .stat-delta {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .stat-delta.delta-up { color: var(--success); }
+  .stat-delta.delta-down { color: var(--danger); }
+
+  /* ── Dashboard ── */
   .dashboard-grid {
     display: grid;
     grid-template-columns: 1.4fr 1fr;
@@ -2567,26 +2688,84 @@
     grid-template-columns: 1fr 1fr;
     gap: 14px;
   }
-  .header-total {
-    font-weight: 400;
-    color: var(--text-muted);
-    font-size: 0.88rem;
-    margin-left: 8px;
-  }
-  .card-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .mono {
-    font-variant-numeric: tabular-nums;
-  }
+  .mono { font-variant-numeric: tabular-nums; }
   .form-help {
     font-size: 0.8rem;
     color: var(--text-secondary);
     margin-bottom: 12px;
     line-height: 1.5;
   }
+
+  /* ── Tabs (expense card) ── */
+  .expenses-card { padding: 0; }
+  .tab-bar {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--border-light);
+    background: linear-gradient(to bottom, var(--surface), var(--surface-hover));
+    padding: 0 16px;
+    gap: 4px;
+  }
+  .tab-btn {
+    border: none;
+    background: transparent;
+    padding: 14px 18px 12px;
+    font-family: inherit;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all var(--transition);
+  }
+  .tab-btn:hover {
+    color: var(--text);
+    background: var(--surface-hover);
+  }
+  .tab-btn.active {
+    color: var(--text);
+    border-bottom-color: var(--primary);
+    background: var(--surface);
+  }
+  .tab-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .tab-total {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .tab-btn.active .tab-total {
+    color: var(--text-secondary);
+  }
+  .tab-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0;
+  }
+  .empty-state {
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: center;
+  }
+  .empty-state p {
+    font-size: 0.9rem;
+  }
+
+  /* ── Backup modal ── */
   .backup-stack {
     display: flex;
     flex-direction: column;
@@ -2637,6 +2816,13 @@
     color: white;
     transition: all var(--transition-spring);
     cursor: pointer;
+    position: relative;
+  }
+  .checkbox-btn::before {
+    /* Larger touch target without affecting layout */
+    content: '';
+    position: absolute;
+    inset: -10px;
   }
   .checkbox-btn:hover {
     border-color: var(--primary);
@@ -2658,14 +2844,6 @@
     color: var(--text-secondary);
     font-size: 0.92rem;
   }
-  .badge-debit {
-    background: #dbeafe;
-    color: #1d4ed8;
-  }
-  .badge-credit {
-    background: #fce7f3;
-    color: #be185d;
-  }
   .draggable-row {
     cursor: grab;
   }
@@ -2674,12 +2852,13 @@
     opacity: 0.7;
   }
   .drag-over-target {
-    border: 2px dashed var(--primary);
+    outline: 2px dashed var(--primary);
+    outline-offset: -4px;
     background-color: var(--primary-light);
     transition: all var(--transition);
   }
 
-  /* ── Row actions (show on hover) ── */
+  /* ── Row actions ── */
   .row-actions {
     display: flex;
     gap: 2px;
@@ -2705,8 +2884,8 @@
     border: none;
     cursor: pointer;
     transition: all var(--transition-spring);
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--pay-pending-bg);
+    color: var(--pay-pending-color);
   }
   .pay-badge:hover {
     box-shadow: 0 2px 8px rgba(0,0,0,0.12);
@@ -2716,11 +2895,11 @@
     transform: scale(0.98);
   }
   .pay-badge-pix {
-    background: #d1fae5;
-    color: #065f46;
+    background: var(--pay-pix-bg);
+    color: var(--pay-pix-color);
   }
 
-  /* ── Compact list (Entradas, Investimentos) ── */
+  /* ── Compact list ── */
   .compact-list {
     display: flex;
     flex-direction: column;
@@ -2732,13 +2911,28 @@
     gap: 8px;
     border-bottom: 1px solid var(--border-light);
     transition: all var(--transition);
+    position: relative;
   }
   .compact-row:last-child {
     border-bottom: none;
   }
+  .compact-row::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    background: var(--primary);
+    border-radius: 0 3px 3px 0;
+    opacity: 0;
+    transition: opacity var(--transition);
+  }
   .compact-row:hover {
     background: var(--surface-hover);
-    padding-left: 20px;
+  }
+  .compact-row:hover::before {
+    opacity: 1;
   }
   .compact-name {
     flex: 1;
@@ -2768,9 +2962,6 @@
   .compact-total {
     font-weight: 700;
     background: linear-gradient(to right, var(--surface-hover), var(--surface));
-  }
-  .compact-total:hover {
-    padding-left: 16px;
   }
 
   /* ── Payment type bars ── */
@@ -2807,15 +2998,39 @@
     background: linear-gradient(90deg, #e11d48, #f472b6);
   }
 
-  /* ── Categories (unified card) ── */
+  /* ── Categories ── */
+  .cat-layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 24px;
+    padding: 20px;
+    align-items: start;
+  }
   .cat-chart-wrap {
-    max-width: 260px;
-    margin: 0 auto 24px;
+    max-width: 240px;
+    width: 100%;
+    margin: 0;
+    position: sticky;
+    top: 80px;
+  }
+  .cat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
   }
   .cat-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 8px;
+  }
+  .cat-grid-empty {
+    margin-top: 4px;
+  }
+  .cat-divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: 6px 0 2px;
   }
   .cat-card {
     padding: 11px 13px;
@@ -2834,13 +3049,13 @@
   }
   .cat-card-over {
     background: var(--danger-light);
-    border-color: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.18);
   }
   .cat-card-empty {
-    opacity: 0.45;
+    opacity: 0.55;
   }
   .cat-card-empty:hover {
-    opacity: 0.85;
+    opacity: 0.9;
   }
   .cat-card-top {
     display: flex;
@@ -2852,7 +3067,7 @@
     height: 9px;
     border-radius: 50%;
     flex-shrink: 0;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 0 2px var(--surface);
   }
   .cat-name {
     font-size: 0.8rem;
@@ -2894,7 +3109,7 @@
     align-items: center;
   }
   .cat-budget-input {
-    width: 68px;
+    width: 78px;
     text-align: right;
     padding: 3px 7px;
     font-size: 0.75rem;
@@ -2909,8 +3124,7 @@
     display: block;
     width: 100%;
     text-align: center;
-    padding: 11px;
-    margin-top: 14px;
+    padding: 10px;
     border: 1.5px dashed var(--border);
     border-radius: var(--radius-sm);
     background: transparent;
@@ -2924,14 +3138,26 @@
     border-color: var(--primary);
     color: var(--primary);
     background: var(--primary-light);
-    transform: translateY(-1px);
   }
 
   /* ── Responsive ── */
-  @media (max-width: 900px) {
+  @media (max-width: 1100px) {
     .stats-bar {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: 1fr 1fr;
     }
+    .stat-card-hero {
+      grid-column: span 2;
+    }
+    .cat-layout {
+      grid-template-columns: 1fr;
+    }
+    .cat-chart-wrap {
+      max-width: 240px;
+      margin: 0 auto 12px;
+      position: static;
+    }
+  }
+  @media (max-width: 900px) {
     .side-grid {
       grid-template-columns: 1fr;
     }
@@ -2940,19 +3166,26 @@
     .stats-bar {
       grid-template-columns: 1fr;
     }
+    .stat-card-hero {
+      grid-column: span 1;
+    }
     .main {
       padding: 12px;
     }
     .backup-section {
       flex-direction: column;
     }
-    .card-actions {
+    .tab-bar {
+      flex-wrap: wrap;
+      padding: 0 8px;
+    }
+    .tab-actions {
       width: 100%;
       justify-content: flex-end;
-      flex-wrap: wrap;
+      padding: 0 0 10px;
     }
     .cat-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr 1fr;
     }
   }
 </style>
