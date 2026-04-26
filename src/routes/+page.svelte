@@ -54,6 +54,7 @@
   let showAddInvestment = $state(false);
   let showImport = $state(false);
   let showBackup = $state(false);
+  let showCategories = $state(false);
   let showCopyFixed = $state(false);
   let copyFixedSubmitting = $state(false);
   let showAllCategories = $state(false);
@@ -691,6 +692,7 @@
     showAddInvestment = false;
     showImport = false;
     showBackup = false;
+    showCategories = false;
     showCopyFixed = false;
     editPayment = null;
     editFixed = null;
@@ -842,6 +844,9 @@
       >
         {theme === "dark" ? "☀" : "☾"}
       </button>
+      <button class="header-action" onclick={() => (showCategories = true)}
+        >Categorias</button
+      >
       <button class="header-action" onclick={() => (showImport = true)}
         >Importar Dados</button
       >
@@ -1547,40 +1552,81 @@
         </div>
       </div>
 
-      <!-- Categories (unified: chart + breakdown) -->
-      <div class="card">
-        <div class="card-header">Categorias</div>
-        <div class="card-body cat-layout">
-          <!-- Chart -->
-          <div class="cat-chart-wrap">
-            <Chart categories={data.byCategory.filter((c) => c.spent > 0)} />
-          </div>
+    </div>
+  </div>
+</main>
 
-          <div class="cat-list">
-          <!-- Active categories (with spending or budget) -->
-          <div class="cat-grid">
-            {#each data.byCategory.filter(c => c.spent > 0 || c.expected > 0) as cat}
-              {@const hasExpected = cat.expected > 0}
-              {@const ratio = hasExpected ? (cat.spent / cat.expected) * 100 : 0}
-              {@const overBudget = hasExpected && cat.spent > cat.expected}
-              <div class="cat-card" class:cat-card-over={overBudget}>
+<!-- CATEGORIES MODAL -->
+<Modal open={showCategories} title="Categorias — {MONTHS[data.month - 1]} {data.year}" onClose={() => (showCategories = false)} size="lg">
+  <div class="modal-body cat-layout">
+    <div class="cat-chart-wrap">
+      <Chart categories={data.byCategory.filter((c) => c.spent > 0)} />
+    </div>
+
+    <div class="cat-list">
+      <div class="cat-grid">
+        {#each data.byCategory.filter(c => c.spent > 0 || c.expected > 0) as cat}
+          {@const hasExpected = cat.expected > 0}
+          {@const ratio = hasExpected ? (cat.spent / cat.expected) * 100 : 0}
+          {@const overBudget = hasExpected && cat.spent > cat.expected}
+          <div class="cat-card" class:cat-card-over={overBudget}>
+            <div class="cat-card-top">
+              <span class="cat-dot" style="background: {cat.color}"></span>
+              <span class="cat-name">{cat.name}</span>
+              {#if cat.percentage > 0}
+                <span class="cat-pct">{cat.percentage.toFixed(1)}%</span>
+              {/if}
+            </div>
+            {#if hasExpected}
+              <div class="cat-bar">
+                <div
+                  class="cat-bar-fill"
+                  style="width: {Math.min(ratio, 100)}%; background: {overBudget ? 'var(--danger)' : cat.color}"
+                ></div>
+              </div>
+            {/if}
+            <div class="cat-card-bottom">
+              <span class="mono cat-value" class:negative={overBudget}>{fmt(cat.spent)}</span>
+              <form
+                method="POST"
+                action="?/updateBudget"
+                use:submitEnhance
+                class="cat-budget-form"
+              >
+                <input type="hidden" name="category_id" value={cat.id} />
+                <input type="hidden" name="_month" value={data.month} />
+                <input type="hidden" name="_year" value={data.year} />
+                <input
+                  type="number"
+                  name="expected_value"
+                  class="input cat-budget-input"
+                  value={cat.expected || ""}
+                  step="0.01"
+                  placeholder="Prev."
+                  onchange={(e) => e.currentTarget.form?.requestSubmit()}
+                />
+              </form>
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      {#if data.byCategory.some(c => c.spent === 0 && c.expected === 0)}
+        <div class="cat-divider"></div>
+        <button class="cat-toggle" onclick={() => (showAllCategories = !showAllCategories)}>
+          {showAllCategories ? 'Ocultar' : 'Mostrar'} categorias sem gastos ({data.byCategory.filter(c => c.spent === 0 && c.expected === 0).length})
+        </button>
+
+        {#if showAllCategories}
+          <div class="cat-grid cat-grid-empty">
+            {#each data.byCategory.filter(c => c.spent === 0 && c.expected === 0) as cat}
+              <div class="cat-card cat-card-empty">
                 <div class="cat-card-top">
                   <span class="cat-dot" style="background: {cat.color}"></span>
                   <span class="cat-name">{cat.name}</span>
-                  {#if cat.percentage > 0}
-                    <span class="cat-pct">{cat.percentage.toFixed(1)}%</span>
-                  {/if}
                 </div>
-                {#if hasExpected}
-                  <div class="cat-bar">
-                    <div
-                      class="cat-bar-fill"
-                      style="width: {Math.min(ratio, 100)}%; background: {overBudget ? 'var(--danger)' : cat.color}"
-                    ></div>
-                  </div>
-                {/if}
                 <div class="cat-card-bottom">
-                  <span class="mono cat-value" class:negative={overBudget}>{fmt(cat.spent)}</span>
+                  <span class="mono cat-value" style="color: var(--text-muted)">{fmt(0)}</span>
                   <form
                     method="POST"
                     action="?/updateBudget"
@@ -1594,7 +1640,7 @@
                       type="number"
                       name="expected_value"
                       class="input cat-budget-input"
-                      value={cat.expected || ""}
+                      value=""
                       step="0.01"
                       placeholder="Prev."
                       onchange={(e) => e.currentTarget.form?.requestSubmit()}
@@ -1604,55 +1650,11 @@
               </div>
             {/each}
           </div>
-
-          <!-- Toggle for empty categories -->
-          {#if data.byCategory.some(c => c.spent === 0 && c.expected === 0)}
-            <div class="cat-divider"></div>
-            <button class="cat-toggle" onclick={() => (showAllCategories = !showAllCategories)}>
-              {showAllCategories ? 'Ocultar' : 'Mostrar'} categorias sem gastos ({data.byCategory.filter(c => c.spent === 0 && c.expected === 0).length})
-            </button>
-
-            {#if showAllCategories}
-              <div class="cat-grid cat-grid-empty">
-                {#each data.byCategory.filter(c => c.spent === 0 && c.expected === 0) as cat}
-                  <div class="cat-card cat-card-empty">
-                    <div class="cat-card-top">
-                      <span class="cat-dot" style="background: {cat.color}"></span>
-                      <span class="cat-name">{cat.name}</span>
-                    </div>
-                    <div class="cat-card-bottom">
-                      <span class="mono cat-value" style="color: var(--text-muted)">{fmt(0)}</span>
-                      <form
-                        method="POST"
-                        action="?/updateBudget"
-                        use:submitEnhance
-                        class="cat-budget-form"
-                      >
-                        <input type="hidden" name="category_id" value={cat.id} />
-                        <input type="hidden" name="_month" value={data.month} />
-                        <input type="hidden" name="_year" value={data.year} />
-                        <input
-                          type="number"
-                          name="expected_value"
-                          class="input cat-budget-input"
-                          value=""
-                          step="0.01"
-                          placeholder="Prev."
-                          onchange={(e) => e.currentTarget.form?.requestSubmit()}
-                        />
-                      </form>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          {/if}
-          </div><!-- /.cat-list -->
-        </div>
-      </div>
+        {/if}
+      {/if}
     </div>
   </div>
-</main>
+</Modal>
 
 <!-- ADD FIXED MODAL -->
 <Modal open={showAddFixed} title="Nova Despesa Fixa" onClose={() => (showAddFixed = false)}>
@@ -2999,17 +3001,17 @@
     background: linear-gradient(90deg, #e11d48, #f472b6);
   }
 
-  /* ── Categories ── */
+  /* ── Categories (modal) ── */
   .cat-layout {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    padding: 20px;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 24px;
+    padding: 24px;
+    align-items: start;
   }
   .cat-chart-wrap {
     max-width: 240px;
     width: 100%;
-    margin: 0 auto;
   }
   .cat-list {
     display: flex;
@@ -3176,6 +3178,13 @@
     }
     .cat-grid {
       grid-template-columns: 1fr 1fr;
+    }
+    .cat-layout {
+      grid-template-columns: 1fr;
+      padding: 16px;
+    }
+    .cat-chart-wrap {
+      margin: 0 auto;
     }
   }
 </style>
