@@ -1,0 +1,45 @@
+{
+  "name": "Finance",
+  "short_name": "Finance",
+  "description": "Controle financeiro pessoal — 100% local, sem servidor.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#e11d48",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Novo gasto mensal",
+      "short_name": "Mensal",
+      "url": "./?quick=monthly",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Nova despesa fixa",
+      "short_name": "Fixa",
+      "url": "./?quick=fixed",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Novo gasto cartão",
+      "short_name": "Cartão",
+      "url": "./?quick=credit",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}

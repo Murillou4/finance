@@ -49,6 +49,7 @@ export interface FixedExpense {
   value: number;
   payment_code: string | null;
   payment_code_type: string | null;
+  due_day: number | null;
 }
 
 export interface MonthlyExpense {
@@ -92,6 +93,20 @@ export interface CategoryBudget {
   expected_value: number;
 }
 
+export interface CategorizeRule {
+  id: number;
+  keyword: string;
+  category_id: number;
+}
+
+export interface FinanceSettings {
+  emergency_reserve_target_months: number;
+  notifications_enabled: number;
+  due_alert_days_ahead: number;
+  last_alerted: Record<string, string>;
+  categorize_rules: CategorizeRule[];
+}
+
 export interface FinanceState {
   categories: Category[];
   months: MonthRecord[];
@@ -101,6 +116,7 @@ export interface FinanceState {
   credit_card_expenses: CreditCardExpense[];
   investments: Investment[];
   category_budgets: CategoryBudget[];
+  settings: FinanceSettings;
 }
 
 export interface FinanceBackup {
@@ -162,6 +178,16 @@ const DEFAULT_CATEGORIES = [
   ['Móveis', '#8b5cf6']
 ] as const;
 
+export function createDefaultSettings(): FinanceSettings {
+  return {
+    emergency_reserve_target_months: 6,
+    notifications_enabled: 0,
+    due_alert_days_ahead: 3,
+    last_alerted: {},
+    categorize_rules: []
+  };
+}
+
 export function createInitialState(): FinanceState {
   return {
     categories: DEFAULT_CATEGORIES.map(([name, color], index) => ({
@@ -176,7 +202,8 @@ export function createInitialState(): FinanceState {
     monthly_expenses: [],
     credit_card_expenses: [],
     investments: [],
-    category_budgets: []
+    category_budgets: [],
+    settings: createDefaultSettings()
   };
 }
 
@@ -247,8 +274,22 @@ export class FinanceDataStore {
     return clone(sortCategories(this.state.categories));
   }
 
+  peekMonthSummary(month: number, year: number): MonthSummary {
+    const normalizedMonth = clampMonth(month);
+    const normalizedYear = Number.isFinite(year) ? Math.trunc(year) : new Date().getFullYear();
+    const existing = this.state.months.find(
+      (item) => item.month === normalizedMonth && item.year === normalizedYear
+    );
+    if (existing) return this.summaryForMonth(existing);
+    return createEmptyMonthSummary(normalizedMonth, normalizedYear);
+  }
+
   getMonthSummary(month: number, year: number): MonthSummary {
     const monthRecord = this.getOrCreateMonth(month, year);
+    return this.summaryForMonth(monthRecord);
+  }
+
+  private summaryForMonth(monthRecord: MonthRecord): MonthSummary {
     const fixed = this.withCategory(
       this.state.fixed_expenses.filter((expense) => expense.month_id === monthRecord.id)
     );
@@ -354,6 +395,7 @@ export class FinanceDataStore {
       value: number;
       payment_code?: string | null;
       payment_code_type?: string | null;
+      due_day?: number | null;
     }
   ) {
     const expense: FixedExpense = {
@@ -365,7 +407,8 @@ export class FinanceDataStore {
       category_id: data.category_id,
       value: data.value,
       payment_code: data.payment_code || null,
-      payment_code_type: data.payment_code_type || null
+      payment_code_type: data.payment_code_type || null,
+      due_day: clampDueDay(data.due_day)
     };
 
     this.state.fixed_expenses.push(expense);
@@ -379,6 +422,55 @@ export class FinanceDataStore {
 
   deleteFixedExpense(id: number) {
     this.state.fixed_expenses = this.state.fixed_expenses.filter((item) => item.id !== id);
+    this.save();
+  }
+
+  getSettings(): FinanceSettings {
+    return clone(this.state.settings);
+  }
+
+  updateSettings(patch: Partial<FinanceSettings>) {
+    this.state.settings = {
+      ...this.state.settings,
+      ...patch,
+      last_alerted: { ...this.state.settings.last_alerted, ...(patch.last_alerted || {}) },
+      categorize_rules: patch.categorize_rules
+        ? patch.categorize_rules.map((rule) => ({ ...rule }))
+        : this.state.settings.categorize_rules
+    };
+    this.save();
+  }
+
+  addCategorizeRule(keyword: string, categoryId: number) {
+    const trimmed = keyword.trim();
+    if (!trimmed) return null;
+    const id = Math.max(0, ...this.state.settings.categorize_rules.map((r) => r.id)) + 1;
+    const rule: CategorizeRule = { id, keyword: trimmed.toLowerCase(), category_id: categoryId };
+    this.state.settings.categorize_rules.push(rule);
+    this.save();
+    return clone(rule);
+  }
+
+  removeCategorizeRule(id: number) {
+    this.state.settings.categorize_rules = this.state.settings.categorize_rules.filter(
+      (rule) => rule.id !== id
+    );
+    this.save();
+  }
+
+  applyAutoCategory(name: string): number | null {
+    const target = normalizeText(name);
+    if (!target) return null;
+    for (const rule of this.state.settings.categorize_rules) {
+      const keyword = normalizeText(rule.keyword);
+      if (!keyword) continue;
+      if (target.includes(keyword)) return rule.category_id;
+    }
+    return null;
+  }
+
+  markAlerted(key: string) {
+    this.state.settings.last_alerted[key] = new Date().toISOString();
     this.save();
   }
 
@@ -416,7 +508,8 @@ export class FinanceDataStore {
         category_id: expense.category_id,
         value: expense.value,
         payment_code: expense.payment_code,
-        payment_code_type: expense.payment_code_type
+        payment_code_type: expense.payment_code_type,
+        due_day: expense.due_day ?? null
       });
       copied++;
     }
@@ -633,7 +726,8 @@ export class FinanceDataStore {
         category_id: data.category_id,
         value: data.value,
         payment_code: data.payment_code || null,
-        payment_code_type: data.payment_code_type || null
+        payment_code_type: data.payment_code_type || null,
+        due_day: null
       });
     } else if (data.target === 'monthly') {
       this.state.monthly_expenses.push({
@@ -702,7 +796,8 @@ export class FinanceDataStore {
         monthly_expenses: sortById(this.state.monthly_expenses),
         credit_card_expenses: sortById(this.state.credit_card_expenses),
         investments: sortById(this.state.investments),
-        category_budgets: sortById(this.state.category_budgets)
+        category_budgets: sortById(this.state.category_budgets),
+        settings: clone(this.state.settings)
       }
     };
   }
@@ -775,7 +870,7 @@ function loadState(storage: StorageLike | null): FinanceState {
 }
 
 function normalizeState(
-  source: Partial<Record<BackupTable, any[]>>,
+  source: Partial<Record<BackupTable, any[]>> & { settings?: unknown },
   options: { seedDefaultCategories?: boolean } = {}
 ) {
   const seedDefaultCategories = options.seedDefaultCategories ?? true;
@@ -813,7 +908,8 @@ function normalizeState(
       category_id: toNullableNumber(item.category_id),
       value: toNumber(item.value),
       payment_code: toNullableString(item.payment_code),
-      payment_code_type: toNullableString(item.payment_code_type)
+      payment_code_type: toNullableString(item.payment_code_type),
+      due_day: clampDueDay(item.due_day)
     })),
     monthly_expenses: (source.monthly_expenses || []).map((item) => ({
       id: toNumber(item.id),
@@ -851,8 +947,59 @@ function normalizeState(
       month_id: toNumber(item.month_id),
       category_id: toNumber(item.category_id),
       expected_value: toNumber(item.expected_value)
-    }))
+    })),
+    settings: normalizeSettings(source.settings)
   };
+}
+
+function normalizeSettings(value: unknown): FinanceSettings {
+  const defaults = createDefaultSettings();
+  if (!value || typeof value !== 'object') return defaults;
+  const raw = value as Record<string, unknown>;
+  const lastAlerted: Record<string, string> = {};
+  if (raw.last_alerted && typeof raw.last_alerted === 'object') {
+    for (const [key, val] of Object.entries(raw.last_alerted as Record<string, unknown>)) {
+      lastAlerted[String(key)] = String(val);
+    }
+  }
+  const rules: CategorizeRule[] = [];
+  if (Array.isArray(raw.categorize_rules)) {
+    let nextId = 1;
+    for (const item of raw.categorize_rules) {
+      if (!item || typeof item !== 'object') continue;
+      const r = item as Record<string, unknown>;
+      const keyword = String(r.keyword || '').trim().toLowerCase();
+      const categoryId = toNumber(r.category_id);
+      if (!keyword || !categoryId) continue;
+      const id = toNumber(r.id) || nextId++;
+      rules.push({ id, keyword, category_id: categoryId });
+    }
+  }
+  return {
+    emergency_reserve_target_months: clampPositive(
+      raw.emergency_reserve_target_months,
+      defaults.emergency_reserve_target_months,
+      1,
+      36
+    ),
+    notifications_enabled: toBoolNumber(raw.notifications_enabled),
+    due_alert_days_ahead: clampPositive(raw.due_alert_days_ahead, defaults.due_alert_days_ahead, 0, 30),
+    last_alerted: lastAlerted,
+    categorize_rules: rules
+  };
+}
+
+function clampPositive(value: unknown, fallback: number, min: number, max: number) {
+  const n = toNumber(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function clampDueDay(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = toNumber(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.max(1, Math.min(31, Math.trunc(n)));
 }
 
 function parseBackupPayload(payload: unknown) {
@@ -873,7 +1020,8 @@ function parseBackupPayload(payload: unknown) {
       monthly_expenses: getRecordArray(data, 'monthly_expenses'),
       credit_card_expenses: getRecordArray(data, 'credit_card_expenses'),
       investments: getRecordArray(data, 'investments'),
-      category_budgets: getRecordArray(data, 'category_budgets')
+      category_budgets: getRecordArray(data, 'category_budgets'),
+      settings: data.settings
     }
   };
 }

@@ -2,11 +2,39 @@
   import { onMount } from "svelte";
   import Chart from "$lib/Chart.svelte";
   import Modal from "$lib/Modal.svelte";
+  import Insights from "$lib/Insights.svelte";
+  import MetricsPanel from "$lib/MetricsPanel.svelte";
+  import NetWorthChart from "$lib/NetWorthChart.svelte";
+  import AnalysisModal from "$lib/AnalysisModal.svelte";
+  import CompareModal from "$lib/CompareModal.svelte";
+  import OFXImportModal from "$lib/OFXImportModal.svelte";
+  import SettingsModal from "$lib/SettingsModal.svelte";
+  import { downloadCSV, exportMonthCSV } from "$lib/client/finance-io";
+  import type { RecurringExpense } from "$lib/client/finance-metrics";
   import {
     createEmptyMonthSummary,
     FinanceDataStore,
+    type FinanceState,
     type MonthSummary,
   } from "$lib/client/finance-data";
+  import {
+    addMonths as addMonthsKey,
+    buildInsights,
+    burnRate,
+    categoryCommitment,
+    categoryDeltas,
+    creditCardRunRate,
+    detectRecurring,
+    emergencyReserve,
+    forecastNextMonth,
+    futureDebt,
+    movingAverageSavingRate,
+    netWorthSeries,
+    pendingDueAlerts,
+    savingRate,
+    topExpenses,
+    type Insight,
+  } from "$lib/client/finance-metrics";
 
   const MONTHS = [
     "Janeiro",
@@ -30,7 +58,7 @@
 
   const initialDate = new Date();
 
-  let finance: FinanceDataStore | null = null;
+  let finance = $state<FinanceDataStore | null>(null);
   let data = $state<MonthSummary>(
     createEmptyMonthSummary(
       initialDate.getMonth() + 1,
@@ -43,6 +71,8 @@
       initialDate.getFullYear(),
     ),
   );
+  let stateSnapshot = $state<FinanceState | null>(null);
+  let prevHistory = $state<MonthSummary[]>([]);
   let form = $state<Record<string, string>>({});
 
   let theme = $state<"light" | "dark">("light");
@@ -56,6 +86,11 @@
   let showBackup = $state(false);
   let showCategories = $state(false);
   let showCopyFixed = $state(false);
+  let showAnalysis = $state(false);
+  let showCompare = $state(false);
+  let showOFX = $state(false);
+  let showSettings = $state(false);
+  let fabOpen = $state(false);
   let copyFixedSubmitting = $state(false);
   let showAllCategories = $state(false);
   let editPayment = $state<{
@@ -96,6 +131,78 @@
   let sortedMonthly = $derived(sortRows(data.monthly, sortMonthly));
   let sortedCredit = $derived(sortRows(data.creditCard, sortCredit));
 
+  let savingBreakdown = $derived(savingRate(data));
+  let savingMa3 = $derived(movingAverageSavingRate(prevHistory.slice(-3), 3));
+  let savingMa12 = $derived(movingAverageSavingRate(prevHistory, 12));
+  let burn = $derived(burnRate(data));
+  let runRate = $derived(creditCardRunRate(data));
+  let commitment = $derived(categoryCommitment(data));
+  let reserve = $derived(
+    stateSnapshot
+      ? emergencyReserve(
+          stateSnapshot,
+          { month: data.month, year: data.year },
+          stateSnapshot.settings.emergency_reserve_target_months,
+        )
+      : {
+          invested: 0,
+          monthlyExpenseTarget: 0,
+          monthsCovered: 0,
+          targetMonths: 6,
+          targetAmount: 0,
+          progressPct: 0,
+          shortfall: 0,
+        },
+  );
+  let debt = $derived(
+    stateSnapshot
+      ? futureDebt(stateSnapshot, { month: data.month, year: data.year }, 12)
+      : { totalPending: 0, countPending: 0, byMonth: [] },
+  );
+  let topMonthExpenses = $derived(topExpenses(data, 5));
+  let monthCategoryDeltas = $derived(categoryDeltas(data, prev));
+  let netWorthPoints = $derived(
+    stateSnapshot
+      ? netWorthSeries(stateSnapshot, {
+          endMonth: { month: data.month, year: data.year },
+          monthsBack: 12,
+        })
+      : [],
+  );
+  let recurring = $derived(
+    stateSnapshot
+      ? detectRecurring(stateSnapshot, { month: data.month, year: data.year })
+      : [],
+  );
+  let forecast = $derived(
+    stateSnapshot
+      ? forecastNextMonth(stateSnapshot, { month: data.month, year: data.year })
+      : {
+          month: data.month,
+          year: data.year,
+          expectedIncome: 0,
+          expectedFixed: 0,
+          expectedVariable: 0,
+          expectedCreditFromInstallments: 0,
+          totalExpense: 0,
+          expectedBalance: 0,
+          basis: 0,
+        },
+  );
+  let insights = $derived<Insight[]>(
+    buildInsights({
+      current: data,
+      previous: prev,
+      burn,
+      reserve,
+      forecast,
+      recurring,
+      futureDebt: debt,
+      deltas: monthCategoryDeltas,
+      savingsBreakdown: savingBreakdown,
+    }),
+  );
+
   onMount(() => {
     finance = new FinanceDataStore();
 
@@ -109,6 +216,9 @@
 
     const current = getUrlMonthYear();
     refreshData(current.month, current.year);
+    runDueAlerts();
+    handleQuickAdd();
+    registerServiceWorker();
 
     const handlePopState = () => {
       const next = getUrlMonthYear();
@@ -389,14 +499,17 @@
       if (action === "addFixed") {
         const { month, year } = getMonthYear(fields);
         const monthRecord = store.getOrCreateMonth(month, year);
+        const name = str(fields, "name");
+        const explicitCat = intOrNull(fields, "category_id");
         store.addFixedExpense(monthRecord.id, {
-          name: str(fields, "name"),
+          name,
           paid: boolInt(fields, "paid"),
           payment_type: str(fields, "payment_type") || "debito",
-          category_id: intOrNull(fields, "category_id"),
+          category_id: explicitCat ?? store.applyAutoCategory(name),
           value: num(fields, "value"),
           payment_code: str(fields, "payment_code"),
           payment_code_type: str(fields, "payment_code_type"),
+          due_day: intOrNull(fields, "due_day"),
         });
         refreshData(month, year);
         return true;
@@ -462,6 +575,7 @@
           payment_code_type: fields.has("payment_code_type")
             ? str(fields, "payment_code_type") || ""
             : undefined,
+          due_day: fields.has("due_day") ? intOrNull(fields, "due_day") : undefined,
         });
         refreshData();
         return true;
@@ -476,11 +590,13 @@
       if (action === "addMonthly") {
         const { month, year } = getMonthYear(fields);
         const monthRecord = store.getOrCreateMonth(month, year);
+        const name = str(fields, "name");
+        const explicitCat = intOrNull(fields, "category_id");
         store.addMonthlyExpense(monthRecord.id, {
-          name: str(fields, "name"),
+          name,
           date: str(fields, "date"),
           paid: boolInt(fields, "paid"),
-          category_id: intOrNull(fields, "category_id"),
+          category_id: explicitCat ?? store.applyAutoCategory(name),
           value: num(fields, "value"),
           payment_code: str(fields, "payment_code"),
           payment_code_type: str(fields, "payment_code_type"),
@@ -518,12 +634,14 @@
       if (action === "addCreditCard") {
         const { month, year } = getMonthYear(fields);
         const monthRecord = store.getOrCreateMonth(month, year);
+        const name = str(fields, "name");
+        const explicitCat = intOrNull(fields, "category_id");
         store.addCreditCardExpense(monthRecord.id, {
-          name: str(fields, "name"),
+          name,
           paid: boolInt(fields, "paid"),
           total_installments: int(fields, "total_installments") || 1,
           date: str(fields, "date"),
-          category_id: intOrNull(fields, "category_id"),
+          category_id: explicitCat ?? store.applyAutoCategory(name),
           value: num(fields, "value"),
           payment_code: str(fields, "payment_code"),
           payment_code_type: str(fields, "payment_code_type"),
@@ -720,6 +838,18 @@
     URL.revokeObjectURL(url);
   }
 
+  function downloadCurrentMonthCSV() {
+    const csv = exportMonthCSV(data);
+    downloadCSV(`finance-${data.year}-${String(data.month).padStart(2, "0")}.csv`, csv);
+  }
+
+  function handleOFXDone(count: number) {
+    refreshData();
+    form = {
+      copyFixedSuccess: `${count} transação(ões) importada(s) do OFX para ${MONTHS[data.month - 1]}.`,
+    };
+  }
+
   function getFinance() {
     finance ??= new FinanceDataStore();
     return finance;
@@ -730,6 +860,13 @@
     data = store.getMonthSummary(month, year);
     const previous = getPreviousMonthOf(month, year);
     prev = store.getMonthSummary(previous.month, previous.year);
+    stateSnapshot = store.getSnapshot();
+    const history: MonthSummary[] = [];
+    for (let offset = 11; offset >= 0; offset--) {
+      const key = addMonthsKey({ month, year }, -offset);
+      history.push(store.peekMonthSummary(key.month, key.year));
+    }
+    prevHistory = history;
   }
 
   function getUrlMonthYear() {
@@ -807,6 +944,86 @@
   function copyToClipboard(text: string | null | undefined) {
     if (text) navigator.clipboard.writeText(text);
   }
+
+  function handleQuickAdd() {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const quick = params.get("quick");
+    if (!quick) return;
+    if (quick === "fixed") showAddFixed = true;
+    else if (quick === "monthly") showAddMonthly = true;
+    else if (quick === "credit") showAddCreditCard = true;
+    else if (quick === "income") showAddIncome = true;
+    else if (quick === "investment") showAddInvestment = true;
+    params.delete("quick");
+    const url = new URL(window.location.href);
+    url.search = params.toString();
+    window.history.replaceState({}, "", url.toString());
+  }
+
+  function registerServiceWorker() {
+    if (typeof navigator === "undefined") return;
+    if (!("serviceWorker" in navigator)) return;
+    if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") return;
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      // SW registration failures are non-critical for client-only app.
+    });
+  }
+
+  function runDueAlerts() {
+    if (typeof window === "undefined" || typeof Notification === "undefined") return;
+    const store = getFinance();
+    const settings = store.getSettings();
+    if (settings.notifications_enabled !== 1) return;
+    if (Notification.permission !== "granted") return;
+
+    const snapshot = store.getSnapshot();
+    const alerts = pendingDueAlerts(snapshot);
+    const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+    for (const alert of alerts) {
+      if (alert.paid) continue;
+      if (settings.last_alerted[alert.monthKey]) continue;
+      const title = alert.daysUntil < 0
+        ? `Vencido: ${alert.name}`
+        : alert.daysUntil === 0
+          ? `Vence hoje: ${alert.name}`
+          : `Vence em ${alert.daysUntil}d: ${alert.name}`;
+      try {
+        new Notification(title, { body: `Valor: ${fmtBRL(alert.value)} — dia ${alert.dueDay}` });
+        store.markAlerted(alert.monthKey);
+      } catch {
+        // Notification API can throw on some browsers; ignore.
+      }
+    }
+  }
+
+  let dueAlertsToday = $derived(
+    stateSnapshot
+      ? pendingDueAlerts(stateSnapshot).filter((a) => !a.paid && a.daysUntil <= 5)
+      : [],
+  );
+
+  function promoteRecurring(item: RecurringExpense) {
+    const store = getFinance();
+    const monthRecord = store.getOrCreateMonth(data.month, data.year);
+    store.addFixedExpense(monthRecord.id, {
+      name: item.name,
+      paid: 0,
+      payment_type: "debito",
+      category_id: item.category_id,
+      value: Math.round(item.averageValue * 100) / 100,
+      payment_code: null,
+      payment_code_type: null,
+      due_day: null,
+    });
+    refreshData();
+    showAnalysis = false;
+    activeTab = "fixed";
+    form = {
+      copyFixedSuccess: `"${item.name}" promovido a fixo com valor médio de ${fmt(item.averageValue)}.`,
+    };
+  }
 </script>
 
 <form
@@ -844,6 +1061,15 @@
       >
         {theme === "dark" ? "☀" : "☾"}
       </button>
+      <button class="header-action" onclick={() => (showAnalysis = true)}
+        >Análise</button
+      >
+      <button class="header-action" onclick={() => (showCompare = true)}
+        >Comparar</button
+      >
+      <button class="header-action" onclick={() => (showSettings = true)}
+        >Config</button
+      >
       <button class="header-action" onclick={() => (showCategories = true)}
         >Categorias</button
       >
@@ -883,6 +1109,40 @@
     </div>
   {/if}
 
+  {#if dueAlertsToday.length > 0}
+    <div class="due-banner" class:overdue={dueAlertsToday.some((a) => a.daysUntil < 0)}>
+      <div class="due-icon">⏰</div>
+      <div class="due-content">
+        <strong>
+          {#if dueAlertsToday.some((a) => a.daysUntil < 0)}
+            Despesa vencida
+          {:else if dueAlertsToday.some((a) => a.daysUntil === 0)}
+            Vence hoje
+          {:else}
+            Vencimentos próximos
+          {/if}
+        </strong>
+        <span class="due-list">
+          {#each dueAlertsToday.slice(0, 4) as alert, i}
+            <span class="due-chip">
+              {alert.name}
+              {#if alert.daysUntil < 0}
+                <em>(vencida há {Math.abs(alert.daysUntil)}d)</em>
+              {:else if alert.daysUntil === 0}
+                <em>(hoje, dia {alert.dueDay})</em>
+              {:else}
+                <em>(em {alert.daysUntil}d)</em>
+              {/if}
+            </span>
+          {/each}
+          {#if dueAlertsToday.length > 4}
+            <span class="due-more">+{dueAlertsToday.length - 4}</span>
+          {/if}
+        </span>
+      </div>
+    </div>
+  {/if}
+
   <!-- Top Stats -->
   <div class="stats-bar">
     <div class="stat-card stat-card-hero" style="--accent: {data.balance >= 0 ? 'var(--success)' : 'var(--danger)'}">
@@ -905,6 +1165,11 @@
         >
           {deltaBalance.diff >= 0 ? "↑" : "↓"} {Math.abs(deltaBalance.pct).toFixed(0)}% vs {prevLabel}
         </span>
+      {/if}
+      {#if netWorthPoints.length > 1}
+        <div class="hero-sparkline">
+          <NetWorthChart points={netWorthPoints} variant="spark" height={40} />
+        </div>
       {/if}
     </div>
 
@@ -959,6 +1224,19 @@
       {/if}
     </div>
   </div>
+
+  <Insights {insights} />
+
+  <MetricsPanel
+    saving={savingBreakdown}
+    {savingMa3}
+    {savingMa12}
+    {burn}
+    {runRate}
+    {commitment}
+    {reserve}
+    {debt}
+  />
 
   <div class="dashboard-grid">
     <!-- LEFT COLUMN -->
@@ -1684,16 +1962,30 @@
               </select>
             </div>
           </div>
-          <div class="form-group">
-            <label for="fixed-value">Valor (R$)</label>
-            <input
-              id="fixed-value"
-              name="value"
-              type="number"
-              step="0.01"
-              class="input"
-              required
-            />
+          <div class="form-row">
+            <div class="form-group">
+              <label for="fixed-value">Valor (R$)</label>
+              <input
+                id="fixed-value"
+                name="value"
+                type="number"
+                step="0.01"
+                class="input"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="fixed-due">Vence dia</label>
+              <input
+                id="fixed-due"
+                name="due_day"
+                type="number"
+                min="1"
+                max="31"
+                class="input"
+                placeholder="1-31"
+              />
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -1735,6 +2027,22 @@
             <p>Baixa um arquivo JSON com meses, categorias, entradas, gastos, cartao, investimentos e metas.</p>
           </div>
           <button type="button" class="btn btn-primary" onclick={downloadBackup}>Baixar backup</button>
+        </section>
+
+        <section class="backup-section">
+          <div class="backup-copy">
+            <h3>Exportar mês como CSV</h3>
+            <p>Planilha (CSV) com fixos, mensais, cartão, receitas e investimentos do mês atual — pronta para abrir no Excel ou Google Sheets.</p>
+          </div>
+          <button type="button" class="btn" onclick={downloadCurrentMonthCSV}>Baixar CSV</button>
+        </section>
+
+        <section class="backup-section">
+          <div class="backup-copy">
+            <h3>Importar OFX (extrato bancário)</h3>
+            <p>Cole o extrato OFX do banco — as transações de débito viram gastos mensais, com auto-categorização por palavra-chave.</p>
+          </div>
+          <button type="button" class="btn" onclick={() => { showBackup = false; showOFX = true; }}>Importar OFX</button>
         </section>
 
         <section class="backup-section backup-section-import">
@@ -2163,17 +2471,32 @@
               </select>
             </div>
           </div>
-          <div class="form-group">
-            <label for="ef-value">Valor (R$)</label>
-            <input
-              id="ef-value"
-              name="value"
-              type="number"
-              step="0.01"
-              class="input"
-              required
-              bind:value={editFixed.value}
-            />
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ef-value">Valor (R$)</label>
+              <input
+                id="ef-value"
+                name="value"
+                type="number"
+                step="0.01"
+                class="input"
+                required
+                bind:value={editFixed.value}
+              />
+            </div>
+            <div class="form-group">
+              <label for="ef-due">Vence dia</label>
+              <input
+                id="ef-due"
+                name="due_day"
+                type="number"
+                min="1"
+                max="31"
+                class="input"
+                placeholder="1-31"
+                bind:value={editFixed.due_day}
+              />
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -2396,6 +2719,79 @@
   {/if}
 </Modal>
 
+<!-- Floating quick-add -->
+<div class="fab-wrap">
+  <button
+    class="fab-btn"
+    aria-label="Adicionar rápido"
+    aria-expanded={fabOpen}
+    onclick={() => (fabOpen = !fabOpen)}
+  >+</button>
+  {#if fabOpen}
+    <div class="fab-menu" onclick={() => (fabOpen = false)} role="presentation">
+      <button class="fab-item" onclick={() => (showAddMonthly = true)}>
+        <span class="fab-dot" style="background: #f59e0b"></span>
+        Gasto mensal
+      </button>
+      <button class="fab-item" onclick={() => (showAddCreditCard = true)}>
+        <span class="fab-dot" style="background: #ec4899"></span>
+        Cartão
+      </button>
+      <button class="fab-item" onclick={() => (showAddFixed = true)}>
+        <span class="fab-dot" style="background: #6366f1"></span>
+        Fixo
+      </button>
+      <button class="fab-item" onclick={() => (showAddIncome = true)}>
+        <span class="fab-dot" style="background: #10b981"></span>
+        Entrada
+      </button>
+      <button class="fab-item" onclick={() => (showAddInvestment = true)}>
+        <span class="fab-dot" style="background: #14b8a6"></span>
+        Investimento
+      </button>
+    </div>
+  {/if}
+</div>
+
+<AnalysisModal
+  open={showAnalysis}
+  onClose={() => (showAnalysis = false)}
+  summary={data}
+  netWorthPoints={netWorthPoints}
+  topExpenses={topMonthExpenses}
+  deltas={monthCategoryDeltas}
+  prevLabel={prevLabel}
+  forecast={forecast}
+  recurring={recurring}
+  onPromoteRecurring={promoteRecurring}
+/>
+
+<CompareModal
+  open={showCompare}
+  onClose={() => (showCompare = false)}
+  finance={finance}
+  initialMonth={data.month}
+  initialYear={data.year}
+/>
+
+<OFXImportModal
+  open={showOFX}
+  onClose={() => (showOFX = false)}
+  finance={finance}
+  month={data.month}
+  year={data.year}
+  categories={data.categories}
+  onDone={handleOFXDone}
+/>
+
+<SettingsModal
+  open={showSettings}
+  onClose={() => (showSettings = false)}
+  finance={finance}
+  categories={data.categories}
+  onChange={() => refreshData()}
+/>
+
 <!-- IMPORT MODAL -->
 <Modal open={showImport} title="Importar Dados" onClose={() => (showImport = false)}>
       <form method="POST" action="?/importData" use:quickEnhance>
@@ -2598,6 +2994,130 @@
     padding: 7px 10px;
     cursor: pointer;
   }
+  .due-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+    border-radius: var(--radius-sm);
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #92400e;
+  }
+  :root[data-theme='dark'] .due-banner {
+    color: #fbbf24;
+  }
+  .due-banner.overdue {
+    background: var(--danger-light);
+    border-color: rgba(239, 68, 68, 0.28);
+    color: var(--danger-text);
+  }
+  .due-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .due-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+  .due-content strong {
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+  .due-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    font-size: 0.84rem;
+  }
+  .due-chip {
+    background: var(--surface);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  .due-chip em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+  .due-more {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    align-self: center;
+  }
+  .fab-wrap {
+    position: fixed;
+    bottom: 18px;
+    right: 18px;
+    z-index: 60;
+  }
+  .fab-btn {
+    display: flex;
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: white;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 8px 22px rgba(225, 29, 72, 0.35);
+    transition: transform var(--transition-spring);
+    user-select: none;
+  }
+  .fab-btn[aria-expanded="true"] {
+    transform: rotate(45deg);
+  }
+  .fab-menu {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    min-width: 180px;
+    overflow: hidden;
+    animation: slideUp 0.2s ease-out;
+  }
+  .fab-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.88rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--transition);
+  }
+  .fab-item:hover {
+    background: var(--surface-hover);
+  }
+  .fab-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  @media (min-width: 900px) {
+    .fab-wrap { bottom: 28px; right: 28px; }
+  }
 
   /* ── Stats bar ── */
   .stats-bar {
@@ -2673,6 +3193,10 @@
   }
   .stat-delta.delta-up { color: var(--success); }
   .stat-delta.delta-down { color: var(--danger); }
+  .hero-sparkline {
+    margin-top: 8px;
+    opacity: 0.85;
+  }
 
   /* ── Dashboard ── */
   .dashboard-grid {
