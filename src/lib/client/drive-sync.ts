@@ -81,6 +81,7 @@ class DriveSyncService {
   }
 
   async connect() {
+    console.log('[DriveSync] Iniciando conexão...');
     if (!this.tokenClient) await this.init();
     if (this.tokenClient) {
       this.tokenClient.requestAccessToken({ prompt: 'consent' });
@@ -88,11 +89,12 @@ class DriveSyncService {
   }
 
   disconnect() {
+    console.log('[DriveSync] Desconectando...');
     if (this.accessToken) {
       try {
         google.accounts.oauth2.revoke(this.accessToken, () => {});
       } catch (e) {
-        console.error('Erro ao revogar token', e);
+        console.error('[DriveSync] Erro ao revogar token', e);
       }
     }
     this.accessToken = null;
@@ -102,23 +104,28 @@ class DriveSyncService {
 
   private updateStatus(patch: Partial<DriveSyncStatus>) {
     this.syncStatus = { ...this.syncStatus, ...patch };
+    console.log('[DriveSync] Status atualizado:', this.syncStatus);
     this.onStatusChange?.(this.syncStatus);
   }
 
   async uploadBackup(data: any) {
-    if (!this.accessToken || !this.syncStatus.connected) return;
+    if (!this.accessToken || !this.syncStatus.connected) {
+      console.log('[DriveSync] Upload cancelado: não conectado ou sem token');
+      return;
+    }
 
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     
     this.debounceTimer = setTimeout(async () => {
+      console.log('[DriveSync] Iniciando upload do backup...');
       this.updateStatus({ isSyncing: true });
       try {
         const fileId = await this.findBackupFile();
         const content = JSON.stringify(data);
         
         if (fileId) {
-          // Update existing file
-          await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+          console.log('[DriveSync] Atualizando arquivo existente:', fileId);
+          const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
             method: 'PATCH',
             headers: {
               Authorization: `Bearer ${this.accessToken}`,
@@ -126,8 +133,9 @@ class DriveSyncService {
             },
             body: content,
           });
+          if (!res.ok) throw new Error(`Erro PATCH: ${res.status}`);
         } else {
-          // Create new file
+          console.log('[DriveSync] Criando novo arquivo no Drive...');
           const metadata = {
             name: BACKUP_FILENAME,
             mimeType: 'application/json',
@@ -147,7 +155,7 @@ class DriveSyncService {
             content +
             close_delim;
 
-          await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${this.accessToken}`,
@@ -155,11 +163,12 @@ class DriveSyncService {
             },
             body: multipartRequestBody,
           });
+          if (!res.ok) throw new Error(`Erro POST: ${res.status}`);
         }
+        console.log('[DriveSync] Upload concluído com sucesso!');
         this.updateStatus({ lastSync: new Date() });
       } catch (e) {
-        console.error('Drive upload failed', e);
-        // Se o erro for 401, o token expirou
+        console.error('[DriveSync] Falha no upload', e);
         if (e instanceof Response && e.status === 401) {
           this.disconnect();
         }
@@ -170,19 +179,29 @@ class DriveSyncService {
   }
 
   async downloadBackup() {
-    if (!this.accessToken || !this.syncStatus.connected) return null;
+    console.log('[DriveSync] Solicitando download do backup...');
+    if (!this.accessToken || !this.syncStatus.connected) {
+      console.log('[DriveSync] Download cancelado: não conectado');
+      return null;
+    }
     try {
       const fileId = await this.findBackupFile();
-      if (!fileId) return null;
+      if (!fileId) {
+        console.log('[DriveSync] Nenhum arquivo de backup encontrado no Drive.');
+        return null;
+      }
 
+      console.log('[DriveSync] Baixando arquivo:', fileId);
       const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { Authorization: `Bearer ${this.accessToken}` },
       });
       
       if (!response.ok) throw response;
-      return await response.json();
+      const data = await response.json();
+      console.log('[DriveSync] Backup baixado com sucesso. Metadados:', data.meta);
+      return data;
     } catch (e) {
-      console.error('Drive download failed', e);
+      console.error('[DriveSync] Falha no download', e);
       return null;
     }
   }
@@ -197,9 +216,11 @@ class DriveSyncService {
         }
       );
       const data = await response.json();
-      return data.files && data.files.length > 0 ? data.files[0].id : null;
+      const id = data.files && data.files.length > 0 ? data.files[0].id : null;
+      console.log('[DriveSync] Busca de arquivo concluída. ID encontrado:', id);
+      return id;
     } catch (e) {
-      console.error('Error finding backup file', e);
+      console.error('[DriveSync] Erro ao buscar arquivo', e);
       return null;
     }
   }

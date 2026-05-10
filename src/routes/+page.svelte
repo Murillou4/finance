@@ -212,18 +212,24 @@
 
     let driveInited = false;
     const checkDriveBackup = async () => {
+      console.log('[Page] Verificando backup no Drive...');
       if (finance) {
         const driveData = await driveSync.downloadBackup();
         if (driveData) {
           const localData = finance.exportBackupData();
           const driveDate = new Date(driveData.meta.exportedAt).getTime();
           const localDate = new Date(localData.meta.exportedAt).getTime();
+          console.log('[Page] Comparando datas - Drive:', driveData.meta.exportedAt, 'Local:', localData.meta.exportedAt);
           if (driveDate > localDate) {
             if (confirm("Um backup mais recente foi encontrado no Google Drive. Deseja carregar?")) {
               finance.importBackupData(driveData);
               refreshData();
             }
+          } else {
+            console.log('[Page] Backup local já é o mais recente ou igual.');
           }
+        } else {
+          console.log('[Page] Nenhum dado retornado do Drive.');
         }
       }
     };
