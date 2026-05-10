@@ -68,13 +68,12 @@ class DriveSyncService {
   private initializeGapi(resolve: () => void) {
     gapi.load('client', async () => {
       try {
-        await gapi.client.init({
-          clientId: CLIENT_ID,
-          scope: SCOPES,
-        });
-        await gapi.client.load('drive', 'v3');
+        // Não usamos mais gapi.client.init para autenticação
+        // Apenas carregamos a descoberta da API do Drive
+        await gapi.client.load('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest');
+        console.log('[DriveSync] GAPI Drive client carregado.');
       } catch (e) {
-        console.error('Erro ao inicializar GAPI', e);
+        console.error('[DriveSync] Erro ao carregar GAPI Drive', e);
       }
       resolve();
     });
