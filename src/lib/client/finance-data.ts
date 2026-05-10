@@ -117,6 +117,7 @@ export interface FinanceState {
   investments: Investment[];
   category_budgets: CategoryBudget[];
   settings: FinanceSettings;
+  last_modified?: string;
 }
 
 export interface FinanceBackup {
@@ -787,7 +788,7 @@ export class FinanceDataStore {
       meta: {
         app: 'finance',
         formatVersion: 1,
-        exportedAt: new Date().toISOString()
+        exportedAt: this.state.last_modified || new Date(0).toISOString()
       },
       data: {
         categories: sortById(this.state.categories),
@@ -806,7 +807,7 @@ export class FinanceDataStore {
   importBackupData(payload: unknown) {
     const backup = parseBackupPayload(payload);
     this.state = normalizeState(backup.data, { seedDefaultCategories: false });
-    this.save();
+    this.save(true);
 
     const totalRecords = BACKUP_TABLES.reduce((sum, table) => sum + this.state[table].length, 0);
 
@@ -847,7 +848,10 @@ export class FinanceDataStore {
     return Math.max(0, ...this.state[table].map((item) => item.id)) + 1;
   }
 
-  private save() {
+  private save(isImport = false) {
+    if (!isImport) {
+      this.state.last_modified = new Date().toISOString();
+    }
     this.storage?.setItem(STORAGE_KEY, JSON.stringify(this.state));
     this.onDataChanged?.();
   }
@@ -950,7 +954,8 @@ function normalizeState(
       category_id: toNumber(item.category_id),
       expected_value: toNumber(item.expected_value)
     })),
-    settings: normalizeSettings(source.settings)
+    settings: normalizeSettings(source.settings),
+    last_modified: (source as any).last_modified || new Date(0).toISOString()
   };
 }
 
@@ -1012,6 +1017,7 @@ function parseBackupPayload(payload: unknown) {
   }
 
   const data = parsed.data;
+  const meta = parsed.meta as Record<string, unknown> | undefined;
 
   return {
     data: {
@@ -1023,7 +1029,8 @@ function parseBackupPayload(payload: unknown) {
       credit_card_expenses: getRecordArray(data, 'credit_card_expenses'),
       investments: getRecordArray(data, 'investments'),
       category_budgets: getRecordArray(data, 'category_budgets'),
-      settings: data.settings
+      settings: data.settings,
+      last_modified: meta?.exportedAt || new Date(0).toISOString()
     }
   };
 }

@@ -221,7 +221,8 @@
           const localDate = new Date(localData.meta.exportedAt).getTime();
           console.log('[Page] Comparando datas - Drive:', driveData.meta.exportedAt, 'Local:', localData.meta.exportedAt);
           if (driveDate > localDate) {
-            if (confirm("Um backup mais recente foi encontrado no Google Drive. Deseja carregar?")) {
+            const isLocalEmpty = localData.data.months.length === 0 && localData.data.fixed_expenses.length === 0 && localData.data.income.length === 0;
+            if (isLocalEmpty || confirm("Um backup mais recente foi encontrado no Google Drive. Deseja carregar?")) {
               finance.importBackupData(driveData);
               refreshData();
             }
