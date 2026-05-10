@@ -6,6 +6,7 @@
     type Category,
     type FinanceSettings,
   } from "$lib/client/finance-data";
+  import { driveSync, type DriveSyncStatus } from "$lib/client/drive-sync";
 
   interface Props {
     open: boolean;
@@ -21,6 +22,7 @@
   let newKeyword = $state("");
   let newCategory = $state<number | null>(null);
   let permissionState = $state<NotificationPermission>("default");
+  let driveStatus = $state<DriveSyncStatus>({ connected: false, isSyncing: false });
 
   $effect(() => {
     if (open && finance) {
@@ -28,6 +30,9 @@
       if (typeof Notification !== "undefined") {
         permissionState = Notification.permission;
       }
+      driveSync.setListener((status) => {
+        driveStatus = status;
+      });
     }
   });
 
@@ -145,6 +150,35 @@
       </section>
 
       <section>
+        <h3>Sincronização com Google Drive</h3>
+        <p class="hint">
+          Salva seus dados automaticamente na sua conta do Google Drive em tempo real.
+        </p>
+        <div class="row">
+          {#if driveStatus.connected}
+            <div class="drive-info">
+              <span class="status-connected">● Conectado</span>
+              {#if driveStatus.lastSync}
+                <span class="last-sync">
+                  Última sincronização: {driveStatus.lastSync.toLocaleTimeString()}
+                </span>
+              {/if}
+              {#if driveStatus.isSyncing}
+                <span class="syncing">Sincronizando...</span>
+              {/if}
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick={() => driveSync.disconnect()}>
+              Desconectar
+            </button>
+          {:else}
+            <button class="btn btn-primary" onclick={() => driveSync.connect()}>
+              Conectar com Google Drive
+            </button>
+          {/if}
+        </div>
+      </section>
+
+      <section>
         <h3>Auto-categorização</h3>
         <p class="hint">
           Quando uma palavra-chave aparece no nome do gasto, a categoria
@@ -223,6 +257,26 @@
   }
   .num-input {
     width: 90px;
+  }
+  .drive-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .status-connected {
+    color: #22c55e;
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+  .last-sync {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  .syncing {
+    font-size: 0.75rem;
+    color: var(--primary);
+    font-weight: 500;
   }
   .unit {
     font-size: 0.85rem;

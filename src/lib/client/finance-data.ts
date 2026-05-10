@@ -241,6 +241,7 @@ export function createEmptyMonthSummary(month: number, year: number): MonthSumma
 export class FinanceDataStore {
   private state: FinanceState;
   private storage: StorageLike | null;
+  public onDataChanged?: () => void;
 
   constructor(options: { storage?: StorageLike | null; state?: FinanceState } = {}) {
     this.storage = options.storage ?? getBrowserStorage();
@@ -848,6 +849,7 @@ export class FinanceDataStore {
 
   private save() {
     this.storage?.setItem(STORAGE_KEY, JSON.stringify(this.state));
+    this.onDataChanged?.();
   }
 }
 

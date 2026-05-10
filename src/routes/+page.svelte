@@ -17,6 +17,7 @@
     type FinanceState,
     type MonthSummary,
   } from "$lib/client/finance-data";
+  import { driveSync } from "$lib/client/drive-sync";
   import {
     addMonths as addMonthsKey,
     buildInsights,
@@ -205,6 +206,31 @@
 
   onMount(() => {
     finance = new FinanceDataStore();
+    finance.onDataChanged = () => {
+      driveSync.uploadBackup(finance!.exportBackupData());
+    };
+
+    let driveInited = false;
+    driveSync.setListener(async (status) => {
+      if (status.connected && driveInited && finance) {
+        const driveData = await driveSync.downloadBackup();
+        if (driveData) {
+          const localData = finance.exportBackupData();
+          const driveDate = new Date(driveData.meta.exportedAt).getTime();
+          const localDate = new Date(localData.meta.exportedAt).getTime();
+          if (driveDate > localDate) {
+            if (confirm("Um backup mais recente foi encontrado no Google Drive. Deseja carregar?")) {
+              finance.importBackupData(driveData);
+              refreshData();
+            }
+          }
+        }
+      }
+    });
+
+    driveSync.init().then(() => {
+      driveInited = true;
+    });
 
     const stored = localStorage.getItem("finance:theme");
     if (stored === "dark" || stored === "light") {
