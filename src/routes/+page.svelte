@@ -211,8 +211,8 @@
     };
 
     let driveInited = false;
-    driveSync.setListener(async (status) => {
-      if (status.connected && driveInited && finance) {
+    const checkDriveBackup = async () => {
+      if (finance) {
         const driveData = await driveSync.downloadBackup();
         if (driveData) {
           const localData = finance.exportBackupData();
@@ -225,6 +225,14 @@
             }
           }
         }
+      }
+    };
+
+    driveSync.onConnect = checkDriveBackup;
+
+    driveSync.setListener(async (status) => {
+      if (status.connected && driveInited) {
+        await checkDriveBackup();
       }
     });
 

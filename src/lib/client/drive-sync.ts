@@ -14,6 +14,7 @@ class DriveSyncService {
   private accessToken: string | null = null;
   private syncStatus: DriveSyncStatus = { connected: false, isSyncing: false };
   private onStatusChange?: (status: DriveSyncStatus) => void;
+  public onConnect?: () => void;
   private debounceTimer: any = null;
 
   constructor() {
@@ -59,6 +60,7 @@ class DriveSyncService {
         this.accessToken = response.access_token;
         localStorage.setItem('finance:drive_token', this.accessToken!);
         this.updateStatus({ connected: true });
+        this.onConnect?.();
       },
     });
   }
