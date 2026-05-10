@@ -227,10 +227,17 @@
               refreshData();
             }
           } else {
-            console.log('[Page] Backup local já é o mais recente ou igual.');
+            console.log('[Page] Backup local já é o mais recente ou igual. Forçando upload para garantir sincronia.');
+            driveSync.uploadBackup(localData);
           }
         } else {
           console.log('[Page] Nenhum dado retornado do Drive.');
+          const localData = finance.exportBackupData();
+          const isLocalEmpty = localData.data.months.length === 0 && localData.data.fixed_expenses.length === 0 && localData.data.income.length === 0;
+          if (!isLocalEmpty) {
+            console.log('[Page] Dados locais detectados. Forçando primeiro upload para a nuvem...');
+            driveSync.uploadBackup(localData);
+          }
         }
       }
     };
