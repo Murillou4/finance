@@ -26,6 +26,10 @@ class DriveSyncService {
     }
   }
 
+  getStatus() {
+    return this.syncStatus;
+  }
+
   setListener(cb: (status: DriveSyncStatus) => void) {
     this.onStatusChange = cb;
     cb(this.syncStatus);
@@ -56,6 +60,11 @@ class DriveSyncService {
       callback: (response: any) => {
         if (response.error !== undefined) {
           throw response;
+        }
+        if (!google.accounts.oauth2.hasGrantedAllScopes(response, SCOPES)) {
+          alert('Você precisa conceder permissão ao Google Drive para o backup funcionar. Por favor, conecte novamente e marque a caixa de permissão.');
+          this.disconnect();
+          return;
         }
         this.accessToken = response.access_token;
         localStorage.setItem('finance:drive_token', this.accessToken!);

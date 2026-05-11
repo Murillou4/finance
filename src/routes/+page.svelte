@@ -252,6 +252,9 @@
 
     driveSync.init().then(() => {
       driveInited = true;
+      if (driveSync.getStatus().connected) {
+        checkDriveBackup();
+      }
     });
 
     const stored = localStorage.getItem("finance:theme");
