@@ -190,6 +190,19 @@
               >
                 {driveStatus.isSyncing ? 'Sincronizando...' : '↻ Sincronizar agora'}
               </button>
+              <button
+                class="btn btn-warning btn-sm"
+                disabled={driveStatus.isSyncing}
+                title="Apaga o arquivo no Drive e envia todos os dados locais do zero. Use se os dados não estão sincronizando."
+                onclick={async () => {
+                  if (!finance) return;
+                  if (confirm('Isso vai substituir TODOS os dados no Google Drive pelos dados deste navegador. Continuar?')) {
+                    await driveSync.resetAndUpload(finance.exportBackupData());
+                  }
+                }}
+              >
+                ⚠ Forçar envio local → Drive
+              </button>
               <button class="btn btn-danger btn-sm" onclick={() => driveSync.disconnect()}>
                 Desconectar
               </button>
@@ -358,6 +371,14 @@
   }
   .btn-danger:hover {
     background: rgba(239, 68, 68, 0.2);
+  }
+  .btn-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+  }
+  .btn-warning:hover {
+    background: rgba(245, 158, 11, 0.2);
   }
   .unit {
     font-size: 0.85rem;

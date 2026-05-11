@@ -418,6 +418,50 @@ class DriveSyncService {
   wasConnected(): boolean {
     return localStorage.getItem(CONNECTED_FLAG_KEY) === '1';
   }
+
+  /** Deleta o arquivo de backup do Drive (para forçar re-upload limpo) */
+  async deleteBackupFile(): Promise<boolean> {
+    const hasToken = await this.ensureValidToken();
+    if (!hasToken) return false;
+    try {
+      const fileId = await this.findBackupFile();
+      if (!fileId) return true; // já não existe
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${this.accessToken}` } }
+      );
+      if (res.ok || res.status === 204) {
+        console.log('[DriveSync] Arquivo de backup deletado do Drive.');
+        return true;
+      }
+      console.error('[DriveSync] Falha ao deletar arquivo:', res.status);
+      return false;
+    } catch (e) {
+      console.error('[DriveSync] Erro ao deletar arquivo:', e);
+      return false;
+    }
+  }
+
+  /** Força upload imediato dos dados locais, deletando o arquivo antigo antes */
+  async resetAndUpload(data: any): Promise<void> {
+    this.updateStatus({ isSyncing: true, error: undefined });
+    this.emitEvent({ type: 'sync_start' });
+    try {
+      await this.deleteBackupFile();
+      await this._createFile(JSON.stringify(data));
+      const now = new Date();
+      this.firstSyncDone = true;
+      this.updateStatus({ lastSync: now, error: undefined });
+      this.emitEvent({ type: 'sync_success', lastSync: now });
+      console.log('[DriveSync] Reset e upload concluídos com sucesso!');
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : 'Erro no reset do Drive.';
+      this.updateStatus({ error: msg });
+      this.emitEvent({ type: 'sync_error', error: msg });
+    } finally {
+      this.updateStatus({ isSyncing: false });
+    }
+  }
 }
 
 export const driveSync = new DriveSyncService();

@@ -242,80 +242,82 @@
     }
 
     let checkInProgress = false;
-    const checkDriveBackup = async () => {
+    const checkDriveBackup = async (isFirstConnect = false) => {
       if (checkInProgress) {
         console.log('[Page] checkDriveBackup já em andamento — ignorando chamada duplicada.');
         return;
       }
       checkInProgress = true;
-      console.log('[Page] Verificando backup no Drive...');
+      console.log('[Page] Verificando backup no Drive... (isFirstConnect:', isFirstConnect, ')');
       try {
         if (!finance) return;
-        const driveData = await driveSync.downloadBackup();
         const localData = finance.exportBackupData();
+        const localHasData = hasLocalData(localData);
 
-        if (driveData) {
-          const driveHasData = hasLocalData(driveData.data as any);
-          const localIsEmpty = !hasLocalData(localData);
+        // REGRA PRINCIPAL: se tem dados locais E é primeira conexão,
+        // sobe os dados locais para o Drive imediatamente (limpa arquivo antigo antes).
+        // Isso garante que dados existentes sempre chegam ao Drive.
+        if (localHasData && isFirstConnect) {
+          console.log('[Page] Primeira conexão com dados locais → enviando para o Drive.');
+          showToast('info', '⬆️ Enviando seus dados para o Google Drive...');
+          await driveSync.resetAndUpload(localData);
+          return;
+        }
 
-          console.log('[Page] Drive tem dados:', driveHasData, '| Local está vazio:', localIsEmpty);
-
-          if (driveHasData && localIsEmpty) {
-            // Drive tem dados, local está vazio → sempre importar do Drive
+        // Se local está vazio (novo browser / nova sessão), tenta baixar do Drive
+        if (!localHasData) {
+          const driveData = await driveSync.downloadBackup();
+          if (driveData && hasLocalData(driveData)) {
             console.log('[Page] Local vazio, Drive tem dados → importando do Drive.');
             showToast('info', '⬇️ Carregando dados do Google Drive...');
             finance.importBackupData(driveData);
             refreshData();
             showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
+            // Atualiza timestamp no Drive
             driveSync.uploadBackupNow(finance.exportBackupData());
-          } else if (driveHasData && !localIsEmpty) {
-            // Ambos têm dados → comparar timestamps
-            const driveDate = new Date(driveData.meta.exportedAt).getTime();
-            const localDate = new Date(localData.meta.exportedAt).getTime();
-            console.log('[Page] Ambos têm dados. Drive:', driveData.meta.exportedAt, '| Local:', localData.meta.exportedAt);
-
-            if (driveDate > localDate) {
-              // Drive é mais recente → perguntar antes de sobrescrever dados locais
-              if (confirm('Um backup mais recente foi encontrado no Google Drive. Deseja carregar esses dados? (Dados locais serão substituídos)')) {
-                showToast('info', '⬇️ Carregando dados do Google Drive...');
-                finance.importBackupData(driveData);
-                refreshData();
-                showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
-                driveSync.uploadBackupNow(finance.exportBackupData());
-              } else {
-                // Usuário escolheu manter local → subir local para Drive
-                driveSync.uploadBackupNow(localData);
-              }
-            } else {
-              // Local é mais recente ou igual → subir para o Drive
-              console.log('[Page] Local mais recente ou igual. Sincronizando para o Drive...');
-              driveSync.uploadBackupNow(localData);
-            }
-          } else if (!driveHasData && !localIsEmpty) {
-            // Drive existe mas está vazio, local tem dados → subir local
-            console.log('[Page] Drive vazio, local tem dados → fazendo upload.');
-            driveSync.uploadBackupNow(localData);
           } else {
-            // Ambos vazios → nada a fazer
-            console.log('[Page] Ambos sem dados. Nada a sincronizar.');
+            console.log('[Page] Nem local nem Drive têm dados.');
+          }
+          return;
+        }
+
+        // Local tem dados mas NÃO é primeira conexão (reconnect / silent refresh)
+        // Compara timestamps para decidir quem está mais atualizado
+        const driveData = await driveSync.downloadBackup();
+        if (!driveData || !hasLocalData(driveData)) {
+          // Drive vazio ou sem arquivo → sobe local
+          console.log('[Page] Reconnect: Drive sem dados → fazendo upload.');
+          driveSync.uploadBackupNow(localData);
+          return;
+        }
+
+        const driveDate = new Date(driveData.meta.exportedAt).getTime();
+        const localDate = new Date(localData.meta.exportedAt).getTime();
+        console.log('[Page] Reconnect: Drive:', driveData.meta.exportedAt, '| Local:', localData.meta.exportedAt);
+
+        if (driveDate > localDate + 5000) {
+          // Drive claramente mais recente (margem de 5s) → perguntar
+          if (confirm('O Google Drive tem dados mais recentes. Deseja substituir os dados locais pelos do Drive?')) {
+            showToast('info', '⬇️ Carregando dados do Google Drive...');
+            finance.importBackupData(driveData);
+            refreshData();
+            showToast('success', '✅ Dados do Google Drive carregados!');
+            driveSync.uploadBackupNow(finance.exportBackupData());
+          } else {
+            driveSync.uploadBackupNow(localData);
           }
         } else {
-          // Nenhum arquivo no Drive
-          console.log('[Page] Nenhum arquivo de backup encontrado no Drive.');
-          if (hasLocalData(localData)) {
-            console.log('[Page] Há dados locais — fazendo upload inicial para o Drive...');
-            showToast('info', '⬆️ Enviando dados locais para o Google Drive...');
-            driveSync.uploadBackupNow(localData);
-          } else {
-            console.log('[Page] Dados locais também estão vazios. Nada a sincronizar.');
-          }
+          // Local mais recente ou igual → sobe para o Drive
+          console.log('[Page] Reconnect: local mais recente → sincronizando para o Drive.');
+          driveSync.uploadBackupNow(localData);
         }
       } finally {
         checkInProgress = false;
       }
     };
 
-    driveSync.onConnect = checkDriveBackup;
+    // Quando o usuário clica em conectar pela primeira vez: sempre envia dados locais
+    driveSync.onConnect = () => checkDriveBackup(true);
 
     driveSync.setListener((status) => {
       driveStatus = status;
@@ -334,11 +336,9 @@
     });
 
     driveSync.init().then(() => {
-      // Se o usuário já havia conectado antes (silent refresh), checkDriveBackup
-      // será chamado via onConnect após o silent refresh completar.
-      // Se por algum motivo o silent refresh completar antes do init(), o status já estará conectado.
+      // Silent refresh (reconnect automático): compara timestamps normalmente
       if (driveSync.getStatus().connected) {
-        checkDriveBackup();
+        checkDriveBackup(false);
       }
     });
 
