@@ -17,7 +17,7 @@
     type FinanceState,
     type MonthSummary,
   } from "$lib/client/finance-data";
-  import { driveSync } from "$lib/client/drive-sync";
+  import { driveSync, type DriveSyncStatus, type SyncEvent } from "$lib/client/drive-sync";
   import {
     addMonths as addMonthsKey,
     buildInsights,
@@ -75,6 +75,22 @@
   let stateSnapshot = $state<FinanceState | null>(null);
   let prevHistory = $state<MonthSummary[]>([]);
   let form = $state<Record<string, string>>({});
+
+  // Drive sync UI state
+  let driveStatus = $state<DriveSyncStatus>({ connected: false, isSyncing: false });
+  interface Toast { id: number; type: 'success' | 'error' | 'info'; message: string; }
+  let toasts = $state<Toast[]>([]);
+  let toastCounter = 0;
+
+  function showToast(type: Toast['type'], message: string, duration = 4000) {
+    const id = ++toastCounter;
+    toasts = [...toasts, { id, type, message }];
+    setTimeout(() => { toasts = toasts.filter(t => t.id !== id); }, duration);
+  }
+
+  function dismissToast(id: number) {
+    toasts = toasts.filter(t => t.id !== id);
+  }
 
   let theme = $state<"light" | "dark">("light");
   let activeTab = $state<"fixed" | "monthly" | "credit">("fixed");
@@ -210,48 +226,95 @@
       driveSync.uploadBackup(finance!.exportBackupData());
     };
 
-    let driveInited = false;
+    /** Verifica se os dados locais têm algum conteúdo real (qualquer tabela com registros) */
+    function hasLocalData(localData: ReturnType<FinanceDataStore['exportBackupData']>): boolean {
+      const d = localData.data;
+      return (
+        d.months.length > 0 ||
+        d.fixed_expenses.length > 0 ||
+        d.monthly_expenses.length > 0 ||
+        d.credit_card_expenses.length > 0 ||
+        d.income.length > 0 ||
+        d.investments.length > 0 ||
+        d.category_budgets.length > 0
+      );
+    }
+
+    let checkInProgress = false;
     const checkDriveBackup = async () => {
+      if (checkInProgress) {
+        console.log('[Page] checkDriveBackup já em andamento — ignorando chamada duplicada.');
+        return;
+      }
+      checkInProgress = true;
       console.log('[Page] Verificando backup no Drive...');
-      if (finance) {
+      try {
+        if (!finance) return;
         const driveData = await driveSync.downloadBackup();
+        const localData = finance.exportBackupData();
+
         if (driveData) {
-          const localData = finance.exportBackupData();
           const driveDate = new Date(driveData.meta.exportedAt).getTime();
           const localDate = new Date(localData.meta.exportedAt).getTime();
-          console.log('[Page] Comparando datas - Drive:', driveData.meta.exportedAt, 'Local:', localData.meta.exportedAt);
+          console.log('[Page] Comparando datas — Drive:', driveData.meta.exportedAt, 'Local:', localData.meta.exportedAt);
+
           if (driveDate > localDate) {
-            const isLocalEmpty = localData.data.months.length === 0 && localData.data.fixed_expenses.length === 0 && localData.data.income.length === 0;
-            if (isLocalEmpty || confirm("Um backup mais recente foi encontrado no Google Drive. Deseja carregar?")) {
+            // Drive é mais recente
+            const localIsEmpty = !hasLocalData(localData);
+            if (localIsEmpty || confirm('Um backup mais recente foi encontrado no Google Drive. Deseja carregar esses dados?')) {
+              showToast('info', '⬇️ Carregando dados do Google Drive...');
               finance.importBackupData(driveData);
               refreshData();
+              showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
+              // Fazer upload logo após para atualizar o timestamp no Drive
+              driveSync.uploadBackupNow(finance.exportBackupData());
+            } else {
+              // Usuário recusou — fazer upload dos dados locais para sobrescrever o Drive
+              driveSync.uploadBackupNow(localData);
             }
           } else {
-            console.log('[Page] Backup local já é o mais recente ou igual. Forçando upload para garantir sincronia.');
-            driveSync.uploadBackup(localData);
+            // Local é mais recente (ou igual) — subir para o Drive
+            console.log('[Page] Dados locais são mais recentes ou iguais. Sincronizando para o Drive...');
+            driveSync.uploadBackupNow(localData);
           }
         } else {
-          console.log('[Page] Nenhum dado retornado do Drive.');
-          const localData = finance.exportBackupData();
-          const isLocalEmpty = localData.data.months.length === 0 && localData.data.fixed_expenses.length === 0 && localData.data.income.length === 0;
-          if (!isLocalEmpty) {
-            console.log('[Page] Dados locais detectados. Forçando primeiro upload para a nuvem...');
-            driveSync.uploadBackup(localData);
+          // Nenhum arquivo no Drive
+          console.log('[Page] Nenhum backup encontrado no Drive.');
+          if (hasLocalData(localData)) {
+            console.log('[Page] Há dados locais — fazendo upload inicial para o Drive...');
+            showToast('info', '⬆️ Enviando dados locais para o Google Drive...');
+            driveSync.uploadBackupNow(localData);
+          } else {
+            console.log('[Page] Dados locais também estão vazios. Nada a sincronizar.');
           }
         }
+      } finally {
+        checkInProgress = false;
       }
     };
 
     driveSync.onConnect = checkDriveBackup;
 
-    driveSync.setListener(async (status) => {
-      if (status.connected && driveInited) {
-        await checkDriveBackup();
+    driveSync.setListener((status) => {
+      driveStatus = status;
+    });
+
+    driveSync.setSyncEventListener((event: SyncEvent) => {
+      if (event.type === 'sync_success') {
+        showToast('success', `☁️ Sincronizado com o Drive (${event.lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})`, 3000);
+      } else if (event.type === 'sync_error') {
+        showToast('error', `❌ Erro ao sincronizar: ${event.error}`, 6000);
+      } else if (event.type === 'connected') {
+        showToast('success', '🔗 Conectado ao Google Drive!', 3000);
+      } else if (event.type === 'disconnected') {
+        showToast('info', 'Desconectado do Google Drive.', 3000);
       }
     });
 
     driveSync.init().then(() => {
-      driveInited = true;
+      // Se o usuário já havia conectado antes (silent refresh), checkDriveBackup
+      // será chamado via onConnect após o silent refresh completar.
+      // Se por algum motivo o silent refresh completar antes do init(), o status já estará conectado.
       if (driveSync.getStatus().connected) {
         checkDriveBackup();
       }
@@ -1099,6 +1162,18 @@
   <input type="hidden" name="_year" value={data.year} />
 </form>
 
+<!-- Toast Notifications -->
+{#if toasts.length > 0}
+  <div class="toast-container" role="status" aria-live="polite">
+    {#each toasts as toast (toast.id)}
+      <div class="toast toast-{toast.type}">
+        <span class="toast-msg">{toast.message}</span>
+        <button class="toast-close" onclick={() => dismissToast(toast.id)} aria-label="Fechar">✕</button>
+      </div>
+    {/each}
+  </div>
+{/if}
+
 <!-- Header -->
 <header class="header">
   <div class="header-inner">
@@ -1112,6 +1187,32 @@
       >
         {theme === "dark" ? "☀" : "☾"}
       </button>
+
+      {#if driveStatus.connected}
+        <button
+          class="drive-badge"
+          class:syncing={driveStatus.isSyncing}
+          class:error={!!driveStatus.error}
+          title={driveStatus.error
+            ? `Erro: ${driveStatus.error}`
+            : driveStatus.isSyncing
+              ? 'Sincronizando...'
+              : driveStatus.lastSync
+                ? `Sincronizado às ${driveStatus.lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                : 'Conectado ao Drive'}
+          onclick={() => (showSettings = true)}
+          aria-label="Status do Google Drive"
+        >
+          {#if driveStatus.isSyncing}
+            <span class="drive-spin">↻</span>
+          {:else if driveStatus.error}
+            <span>☁ !</span>
+          {:else}
+            <span>☁ ✓</span>
+          {/if}
+        </button>
+      {/if}
+
       <button class="header-action" onclick={() => (showAnalysis = true)}
         >Análise</button
       >
@@ -2927,6 +3028,109 @@
     background: var(--header-control-hover);
     transform: translateY(-1px);
   }
+
+  /* ── Drive Badge ── */
+  .drive-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    background: rgba(34, 197, 94, 0.08);
+    color: #22c55e;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+  }
+  .drive-badge:hover {
+    background: rgba(34, 197, 94, 0.15);
+    transform: translateY(-1px);
+  }
+  .drive-badge.syncing {
+    border-color: rgba(99, 102, 241, 0.5);
+    background: rgba(99, 102, 241, 0.1);
+    color: #818cf8;
+  }
+  .drive-badge.error {
+    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+  }
+  .drive-spin {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+
+  /* ── Toast Notifications ── */
+  .toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+  }
+  .toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    max-width: 360px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    pointer-events: all;
+    animation: toast-in 0.25s ease forwards;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(12px) scale(0.95); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .toast-success {
+    background: rgba(16, 42, 24, 0.95);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #86efac;
+  }
+  .toast-error {
+    background: rgba(42, 16, 16, 0.95);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+  }
+  .toast-info {
+    background: rgba(16, 24, 42, 0.95);
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    color: #a5b4fc;
+  }
+  .toast-msg {
+    flex: 1;
+  }
+  .toast-close {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+    padding: 0 4px;
+    font-size: 0.85rem;
+    line-height: 1;
+    transition: opacity 0.15s;
+  }
+  .toast-close:hover {
+    opacity: 1;
+  }
+
   .header-action {
     padding: 7px 16px;
     border: 1px solid var(--header-control-border);

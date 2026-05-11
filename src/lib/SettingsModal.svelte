@@ -154,28 +154,55 @@
         <p class="hint">
           Salva seus dados automaticamente na sua conta do Google Drive em tempo real.
         </p>
-        <div class="row">
-          {#if driveStatus.connected}
-            <div class="drive-info">
-              <span class="status-connected">● Conectado</span>
-              {#if driveStatus.lastSync}
-                <span class="last-sync">
-                  Última sincronização: {driveStatus.lastSync.toLocaleTimeString()}
-                </span>
-              {/if}
+        {#if driveStatus.connected}
+          <div class="drive-status-block">
+            <div class="drive-status-row">
+              <span class="status-dot"></span>
+              <span class="status-text">Conectado ao Google Drive</span>
               {#if driveStatus.isSyncing}
-                <span class="syncing">Sincronizando...</span>
+                <span class="sync-pill syncing">Sincronizando...</span>
+              {:else if driveStatus.error}
+                <span class="sync-pill error">Erro</span>
+              {:else if driveStatus.lastSync}
+                <span class="sync-pill ok">✓ Sincronizado</span>
               {/if}
             </div>
-            <button class="btn btn-secondary btn-sm" onclick={() => driveSync.disconnect()}>
-              Desconectar
-            </button>
-          {:else}
-            <button class="btn btn-primary" onclick={() => driveSync.connect()}>
-              Conectar com Google Drive
-            </button>
-          {/if}
-        </div>
+
+            {#if driveStatus.lastSync && !driveStatus.isSyncing}
+              <p class="last-sync">
+                Última sincronização: {driveStatus.lastSync.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            {/if}
+
+            {#if driveStatus.error}
+              <p class="sync-error">&#x274c; {driveStatus.error}</p>
+            {/if}
+
+            <div class="drive-actions">
+              <button
+                class="btn btn-secondary btn-sm"
+                disabled={driveStatus.isSyncing}
+                onclick={async () => {
+                  if (finance) {
+                    await driveSync.uploadBackupNow(finance.exportBackupData());
+                  }
+                }}
+              >
+                {driveStatus.isSyncing ? 'Sincronizando...' : '↻ Sincronizar agora'}
+              </button>
+              <button class="btn btn-danger btn-sm" onclick={() => driveSync.disconnect()}>
+                Desconectar
+              </button>
+            </div>
+          </div>
+        {:else}
+          <button class="btn btn-primary" onclick={() => driveSync.connect()}>
+            Conectar com Google Drive
+          </button>
+          <p class="hint" style="margin-top: 6px;">
+            Ao conectar, seus dados locais serão sincronizados automaticamente.
+          </p>
+        {/if}
       </section>
 
       <section>
@@ -258,25 +285,79 @@
   .num-input {
     width: 90px;
   }
-  .drive-info {
+  .drive-status-block {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    flex: 1;
+    gap: 8px;
+    padding: 12px;
+    background: var(--surface-hover);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light);
   }
-  .status-connected {
-    color: #22c55e;
+  .drive-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+    flex-shrink: 0;
+  }
+  .status-text {
     font-size: 0.88rem;
     font-weight: 600;
+    color: var(--text);
+    flex: 1;
+  }
+  .sync-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+  .sync-pill.ok {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+  }
+  .sync-pill.syncing {
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+  }
+  .sync-pill.error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
   }
   .last-sync {
     font-size: 0.75rem;
     color: var(--text-muted);
+    margin: 0;
   }
-  .syncing {
-    font-size: 0.75rem;
-    color: var(--primary);
-    font-weight: 500;
+  .sync-error {
+    font-size: 0.78rem;
+    color: #f87171;
+    margin: 0;
+    padding: 6px 10px;
+    background: rgba(239, 68, 68, 0.08);
+    border-radius: 6px;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+  .drive-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .btn-danger {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #f87171;
+  }
+  .btn-danger:hover {
+    background: rgba(239, 68, 68, 0.2);
   }
   .unit {
     font-size: 0.85rem;
