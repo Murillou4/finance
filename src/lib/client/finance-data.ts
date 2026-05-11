@@ -788,7 +788,9 @@ export class FinanceDataStore {
       meta: {
         app: 'finance',
         formatVersion: 1,
-        exportedAt: this.state.last_modified || new Date(0).toISOString()
+        exportedAt: this.state.last_modified && this.state.last_modified !== new Date(0).toISOString()
+          ? this.state.last_modified
+          : new Date().toISOString()
       },
       data: {
         categories: sortById(this.state.categories),
@@ -955,7 +957,9 @@ function normalizeState(
       expected_value: toNumber(item.expected_value)
     })),
     settings: normalizeSettings(source.settings),
-    last_modified: (source as any).last_modified || new Date(0).toISOString()
+    last_modified: (source as any).last_modified && (source as any).last_modified !== new Date(0).toISOString()
+      ? (source as any).last_modified
+      : new Date().toISOString()
   };
 }
 

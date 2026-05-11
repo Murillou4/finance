@@ -226,17 +226,18 @@
       driveSync.uploadBackup(finance!.exportBackupData());
     };
 
-    /** Verifica se os dados locais têm algum conteúdo real (qualquer tabela com registros) */
-    function hasLocalData(localData: ReturnType<FinanceDataStore['exportBackupData']>): boolean {
-      const d = localData.data;
+    /** Verifica se um conjunto de dados tem algum conteúdo real (qualquer tabela com registros) */
+    function hasLocalData(source: { data?: any } | any): boolean {
+      // Aceita tanto { data: { months, ... } } quanto { months, ... } diretamente
+      const d = source?.data ?? source;
       return (
-        d.months.length > 0 ||
-        d.fixed_expenses.length > 0 ||
-        d.monthly_expenses.length > 0 ||
-        d.credit_card_expenses.length > 0 ||
-        d.income.length > 0 ||
-        d.investments.length > 0 ||
-        d.category_budgets.length > 0
+        (Array.isArray(d.months) && d.months.length > 0) ||
+        (Array.isArray(d.fixed_expenses) && d.fixed_expenses.length > 0) ||
+        (Array.isArray(d.monthly_expenses) && d.monthly_expenses.length > 0) ||
+        (Array.isArray(d.credit_card_expenses) && d.credit_card_expenses.length > 0) ||
+        (Array.isArray(d.income) && d.income.length > 0) ||
+        (Array.isArray(d.investments) && d.investments.length > 0) ||
+        (Array.isArray(d.category_budgets) && d.category_budgets.length > 0)
       );
     }
 
@@ -254,32 +255,53 @@
         const localData = finance.exportBackupData();
 
         if (driveData) {
-          const driveDate = new Date(driveData.meta.exportedAt).getTime();
-          const localDate = new Date(localData.meta.exportedAt).getTime();
-          console.log('[Page] Comparando datas — Drive:', driveData.meta.exportedAt, 'Local:', localData.meta.exportedAt);
+          const driveHasData = hasLocalData(driveData.data as any);
+          const localIsEmpty = !hasLocalData(localData);
 
-          if (driveDate > localDate) {
-            // Drive é mais recente
-            const localIsEmpty = !hasLocalData(localData);
-            if (localIsEmpty || confirm('Um backup mais recente foi encontrado no Google Drive. Deseja carregar esses dados?')) {
-              showToast('info', '⬇️ Carregando dados do Google Drive...');
-              finance.importBackupData(driveData);
-              refreshData();
-              showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
-              // Fazer upload logo após para atualizar o timestamp no Drive
-              driveSync.uploadBackupNow(finance.exportBackupData());
+          console.log('[Page] Drive tem dados:', driveHasData, '| Local está vazio:', localIsEmpty);
+
+          if (driveHasData && localIsEmpty) {
+            // Drive tem dados, local está vazio → sempre importar do Drive
+            console.log('[Page] Local vazio, Drive tem dados → importando do Drive.');
+            showToast('info', '⬇️ Carregando dados do Google Drive...');
+            finance.importBackupData(driveData);
+            refreshData();
+            showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
+            driveSync.uploadBackupNow(finance.exportBackupData());
+          } else if (driveHasData && !localIsEmpty) {
+            // Ambos têm dados → comparar timestamps
+            const driveDate = new Date(driveData.meta.exportedAt).getTime();
+            const localDate = new Date(localData.meta.exportedAt).getTime();
+            console.log('[Page] Ambos têm dados. Drive:', driveData.meta.exportedAt, '| Local:', localData.meta.exportedAt);
+
+            if (driveDate > localDate) {
+              // Drive é mais recente → perguntar antes de sobrescrever dados locais
+              if (confirm('Um backup mais recente foi encontrado no Google Drive. Deseja carregar esses dados? (Dados locais serão substituídos)')) {
+                showToast('info', '⬇️ Carregando dados do Google Drive...');
+                finance.importBackupData(driveData);
+                refreshData();
+                showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
+                driveSync.uploadBackupNow(finance.exportBackupData());
+              } else {
+                // Usuário escolheu manter local → subir local para Drive
+                driveSync.uploadBackupNow(localData);
+              }
             } else {
-              // Usuário recusou — fazer upload dos dados locais para sobrescrever o Drive
+              // Local é mais recente ou igual → subir para o Drive
+              console.log('[Page] Local mais recente ou igual. Sincronizando para o Drive...');
               driveSync.uploadBackupNow(localData);
             }
-          } else {
-            // Local é mais recente (ou igual) — subir para o Drive
-            console.log('[Page] Dados locais são mais recentes ou iguais. Sincronizando para o Drive...');
+          } else if (!driveHasData && !localIsEmpty) {
+            // Drive existe mas está vazio, local tem dados → subir local
+            console.log('[Page] Drive vazio, local tem dados → fazendo upload.');
             driveSync.uploadBackupNow(localData);
+          } else {
+            // Ambos vazios → nada a fazer
+            console.log('[Page] Ambos sem dados. Nada a sincronizar.');
           }
         } else {
           // Nenhum arquivo no Drive
-          console.log('[Page] Nenhum backup encontrado no Drive.');
+          console.log('[Page] Nenhum arquivo de backup encontrado no Drive.');
           if (hasLocalData(localData)) {
             console.log('[Page] Há dados locais — fazendo upload inicial para o Drive...');
             showToast('info', '⬆️ Enviando dados locais para o Google Drive...');
