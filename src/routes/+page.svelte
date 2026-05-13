@@ -78,6 +78,15 @@
 
   // Drive sync UI state
   let driveStatus = $state<DriveSyncStatus>({ connected: false, isSyncing: false });
+  type DriveLoadState = "initializing" | "needs_connection" | "connecting" | "loading" | "ready" | "error";
+  let driveLoadState = $state<DriveLoadState>("initializing");
+  let driveLoadError = $state("");
+  let driveLoadPromise: Promise<void> | null = null;
+  let driveGateBusy = $derived(
+    driveLoadState === "initializing" ||
+      driveLoadState === "connecting" ||
+      driveLoadState === "loading",
+  );
   interface Toast { id: number; type: 'success' | 'error' | 'info'; message: string; }
   let toasts = $state<Toast[]>([]);
   let toastCounter = 0;
@@ -221,142 +230,58 @@
   );
 
   onMount(() => {
-    finance = new FinanceDataStore();
-    finance.onDataChanged = () => {
-      driveSync.uploadBackup(finance!.exportBackupData());
-    };
-
-    /** Verifica se um conjunto de dados tem algum conteúdo real (qualquer tabela com registros) */
-    function hasLocalData(source: { data?: any } | any): boolean {
-      // Aceita tanto { data: { months, ... } } quanto { months, ... } diretamente
-      const d = source?.data ?? source;
-      return (
-        (Array.isArray(d.months) && d.months.length > 0) ||
-        (Array.isArray(d.fixed_expenses) && d.fixed_expenses.length > 0) ||
-        (Array.isArray(d.monthly_expenses) && d.monthly_expenses.length > 0) ||
-        (Array.isArray(d.credit_card_expenses) && d.credit_card_expenses.length > 0) ||
-        (Array.isArray(d.income) && d.income.length > 0) ||
-        (Array.isArray(d.investments) && d.investments.length > 0) ||
-        (Array.isArray(d.category_budgets) && d.category_budgets.length > 0)
-      );
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      theme = "dark";
     }
+    applyTheme(theme);
+    registerServiceWorker();
 
-    let checkInProgress = false;
-    const checkDriveBackup = async (isFirstConnect = false) => {
-      if (checkInProgress) {
-        console.log('[Page] checkDriveBackup já em andamento — ignorando chamada duplicada.');
-        return;
-      }
-      checkInProgress = true;
-      console.log('[Page] Verificando backup no Drive... (isFirstConnect:', isFirstConnect, ')');
-      try {
-        if (!finance) return;
-        const localData = finance.exportBackupData();
-        const localHasData = hasLocalData(localData);
+    driveSync.onConnect = () => loadFinanceFromDrive();
 
-        // REGRA PRINCIPAL: se tem dados locais E é primeira conexão,
-        // sobe os dados locais para o Drive imediatamente (limpa arquivo antigo antes).
-        // Isso garante que dados existentes sempre chegam ao Drive.
-        if (localHasData && isFirstConnect) {
-          console.log('[Page] Primeira conexão com dados locais → enviando para o Drive.');
-          showToast('info', '⬆️ Enviando seus dados para o Google Drive...');
-          await driveSync.resetAndUpload(localData);
-          return;
-        }
-
-        // Se local está vazio (novo browser / nova sessão), tenta baixar do Drive
-        if (!localHasData) {
-          const driveData = await driveSync.downloadBackup();
-          if (driveData && hasLocalData(driveData)) {
-            console.log('[Page] Local vazio, Drive tem dados → importando do Drive.');
-            showToast('info', '⬇️ Carregando dados do Google Drive...');
-            finance.importBackupData(driveData);
-            refreshData();
-            showToast('success', '✅ Dados restaurados do Google Drive com sucesso!');
-            // Atualiza timestamp no Drive
-            driveSync.uploadBackupNow(finance.exportBackupData());
-          } else {
-            console.log('[Page] Nem local nem Drive têm dados.');
-          }
-          return;
-        }
-
-        // Local tem dados mas NÃO é primeira conexão (reconnect / silent refresh)
-        // Compara timestamps para decidir quem está mais atualizado
-        const driveData = await driveSync.downloadBackup();
-        if (!driveData || !hasLocalData(driveData)) {
-          // Drive vazio ou sem arquivo → sobe local
-          console.log('[Page] Reconnect: Drive sem dados → fazendo upload.');
-          driveSync.uploadBackupNow(localData);
-          return;
-        }
-
-        const driveDate = new Date(driveData.meta.exportedAt).getTime();
-        const localDate = new Date(localData.meta.exportedAt).getTime();
-        console.log('[Page] Reconnect: Drive:', driveData.meta.exportedAt, '| Local:', localData.meta.exportedAt);
-
-        if (driveDate > localDate + 5000) {
-          // Drive claramente mais recente (margem de 5s) → perguntar
-          if (confirm('O Google Drive tem dados mais recentes. Deseja substituir os dados locais pelos do Drive?')) {
-            showToast('info', '⬇️ Carregando dados do Google Drive...');
-            finance.importBackupData(driveData);
-            refreshData();
-            showToast('success', '✅ Dados do Google Drive carregados!');
-            driveSync.uploadBackupNow(finance.exportBackupData());
-          } else {
-            driveSync.uploadBackupNow(localData);
-          }
-        } else {
-          // Local mais recente ou igual → sobe para o Drive
-          console.log('[Page] Reconnect: local mais recente → sincronizando para o Drive.');
-          driveSync.uploadBackupNow(localData);
-        }
-      } finally {
-        checkInProgress = false;
-      }
-    };
-
-    // Quando o usuário clica em conectar pela primeira vez: sempre envia dados locais
-    driveSync.onConnect = () => checkDriveBackup(true);
-
-    driveSync.setListener((status) => {
+    const unsubscribeDriveStatus = driveSync.setListener((status) => {
       driveStatus = status;
+
+      if (status.error && driveLoadState !== "ready") {
+        driveLoadError = status.error;
+        driveLoadState = "error";
+      }
+
+      if (!status.connected && driveLoadState === "ready") {
+        clearFinanceSession();
+        driveLoadState = "needs_connection";
+      }
     });
 
     driveSync.setSyncEventListener((event: SyncEvent) => {
       if (event.type === 'sync_success') {
-        showToast('success', `☁️ Sincronizado com o Drive (${event.lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})`, 3000);
+        showToast('success', `Sincronizado com o Drive (${event.lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})`, 3000);
       } else if (event.type === 'sync_error') {
-        showToast('error', `❌ Erro ao sincronizar: ${event.error}`, 6000);
+        showToast('error', `Erro ao sincronizar: ${event.error}`, 6000);
       } else if (event.type === 'connected') {
-        showToast('success', '🔗 Conectado ao Google Drive!', 3000);
+        showToast('success', 'Conectado ao Google Drive.', 3000);
       } else if (event.type === 'disconnected') {
         showToast('info', 'Desconectado do Google Drive.', 3000);
       }
     });
 
     driveSync.init().then(() => {
-      // Silent refresh (reconnect automático): compara timestamps normalmente
-      if (driveSync.getStatus().connected) {
-        checkDriveBackup(false);
+      if (!driveSync.isConfigured()) {
+        driveLoadError = "Configure VITE_GOOGLE_CLIENT_ID para usar o Google Drive.";
+        driveLoadState = "error";
+        return;
       }
+
+      driveLoadState = driveSync.getStatus().connected ? "loading" : "needs_connection";
+      if (driveSync.getStatus().connected) {
+        loadFinanceFromDrive();
+      }
+    }).catch((error) => {
+      driveLoadError = error instanceof Error ? error.message : "Nao foi possivel inicializar o Google Drive.";
+      driveLoadState = "error";
     });
 
-    const stored = localStorage.getItem("finance:theme");
-    if (stored === "dark" || stored === "light") {
-      theme = stored;
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      theme = "dark";
-    }
-    applyTheme(theme);
-
-    const current = getUrlMonthYear();
-    refreshData(current.month, current.year);
-    runDueAlerts();
-    handleQuickAdd();
-    registerServiceWorker();
-
     const handlePopState = () => {
+      if (driveLoadState !== "ready") return;
       const next = getUrlMonthYear();
       refreshData(next.month, next.year);
     };
@@ -365,8 +290,100 @@
 
     return () => {
       window.removeEventListener("popstate", handlePopState);
+      unsubscribeDriveStatus();
     };
   });
+
+  function hasFinanceContent(source: { data?: any } | any): boolean {
+    const d = source?.data ?? source;
+    if (!d) return false;
+    return (
+      (Array.isArray(d.months) && d.months.length > 0) ||
+      (Array.isArray(d.fixed_expenses) && d.fixed_expenses.length > 0) ||
+      (Array.isArray(d.monthly_expenses) && d.monthly_expenses.length > 0) ||
+      (Array.isArray(d.credit_card_expenses) && d.credit_card_expenses.length > 0) ||
+      (Array.isArray(d.income) && d.income.length > 0) ||
+      (Array.isArray(d.investments) && d.investments.length > 0) ||
+      (Array.isArray(d.category_budgets) && d.category_budgets.length > 0)
+    );
+  }
+
+  function attachFinanceSession(store: FinanceDataStore) {
+    finance = store;
+    finance.onDataChanged = () => {
+      if (driveLoadState !== "ready" || !driveSync.getStatus().connected) return;
+      void driveSync.uploadBackup(finance!.exportBackupData());
+    };
+  }
+
+  function clearFinanceSession() {
+    finance = null;
+    const current = getUrlMonthYear();
+    const previous = getPreviousMonthOf(current.month, current.year);
+    data = createEmptyMonthSummary(current.month, current.year);
+    prev = createEmptyMonthSummary(previous.month, previous.year);
+    stateSnapshot = null;
+    prevHistory = [];
+    closeQuickForms();
+    showAnalysis = false;
+    showCompare = false;
+    showOFX = false;
+    showSettings = false;
+  }
+
+  async function loadFinanceFromDrive() {
+    if (driveLoadPromise) return driveLoadPromise;
+
+    driveLoadState = "loading";
+    driveLoadError = "";
+
+    driveLoadPromise = (async () => {
+      try {
+        const backup = await driveSync.downloadBackup();
+        const store = new FinanceDataStore();
+        const driveHasContent = hasFinanceContent(backup);
+
+        if (backup) {
+          store.importBackupData(backup, { preserveTimestamp: true });
+        }
+
+        attachFinanceSession(store);
+        driveLoadState = "ready";
+
+        const current = getUrlMonthYear();
+        refreshData(current.month, current.year);
+        runDueAlerts();
+        handleQuickAdd();
+
+        if (backup && driveHasContent) {
+          showToast("success", "Dados carregados do Google Drive.", 3000);
+        } else if (!backup) {
+          await driveSync.uploadBackupNow(store.exportBackupData());
+          showToast("info", "Google Drive conectado. Importe um backup antigo se quiser restaurar dados.", 5000);
+        }
+      } catch (error) {
+        clearFinanceSession();
+        driveLoadError = error instanceof Error ? error.message : "Nao foi possivel carregar os dados do Google Drive.";
+        driveLoadState = "error";
+        showToast("error", driveLoadError, 6000);
+      } finally {
+        driveLoadPromise = null;
+      }
+    })();
+
+    return driveLoadPromise;
+  }
+
+  async function connectDriveFromGate() {
+    driveLoadError = "";
+    driveLoadState = "connecting";
+    try {
+      await driveSync.connect();
+    } catch (error) {
+      driveLoadError = error instanceof Error ? error.message : "Nao foi possivel conectar ao Google Drive.";
+      driveLoadState = "error";
+    }
+  }
 
   function applyTheme(value: "light" | "dark") {
     if (typeof document === "undefined") return;
@@ -376,9 +393,6 @@
   function toggleTheme() {
     theme = theme === "dark" ? "light" : "dark";
     applyTheme(theme);
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("finance:theme", theme);
-    }
   }
 
   function goToToday() {
@@ -902,6 +916,7 @@
 
         const content = await backupFile.text();
         const summary = store.importBackupData(content);
+        await driveSync.uploadBackupNow(store.exportBackupData());
         form = {
           backupSuccess: `Backup importado com sucesso. ${summary.totalRecords} registros restaurados.`,
         };
@@ -987,7 +1002,9 @@
   }
 
   function getFinance() {
-    finance ??= new FinanceDataStore();
+    if (!finance) {
+      throw new Error("Conecte o Google Drive antes de alterar dados.");
+    }
     return finance;
   }
 
@@ -1196,6 +1213,49 @@
   </div>
 {/if}
 
+{#if driveLoadState !== "ready" || !driveStatus.connected}
+  <main class="drive-entry">
+    <section class="drive-entry-panel" aria-labelledby="drive-entry-title">
+      <div class="drive-entry-kicker">Finance</div>
+      <h1 id="drive-entry-title">Conectar Google Drive</h1>
+      <p>
+        Os dados financeiros ficam no Google Drive. Conecte sua conta para carregar o app.
+      </p>
+
+      {#if driveLoadState === "loading"}
+        <div class="drive-entry-status">Carregando dados do Google Drive...</div>
+      {:else if driveLoadState === "connecting"}
+        <div class="drive-entry-status">Aguardando permissao do Google Drive...</div>
+      {:else if driveLoadState === "initializing"}
+        <div class="drive-entry-status">Preparando conexao...</div>
+      {/if}
+
+      {#if driveLoadError}
+        <div class="drive-entry-error">{driveLoadError}</div>
+      {/if}
+
+      <div class="drive-entry-actions">
+        {#if driveStatus.connected && driveLoadState === "error"}
+          <button class="btn btn-primary" disabled={driveGateBusy} onclick={loadFinanceFromDrive}>
+            Tentar carregar novamente
+          </button>
+        {:else}
+          <button class="btn btn-primary" disabled={driveGateBusy} onclick={connectDriveFromGate}>
+            {driveGateBusy ? "Conectando..." : "Conectar com Google Drive"}
+          </button>
+        {/if}
+        <button
+          class="header-icon-btn"
+          title={theme === "dark" ? "Tema claro" : "Tema escuro"}
+          aria-label="Alternar tema"
+          onclick={toggleTheme}
+        >
+          {theme === "dark" ? "☀" : "☾"}
+        </button>
+      </div>
+    </section>
+  </main>
+{:else}
 <!-- Header -->
 <header class="header">
   <div class="header-inner">
@@ -1278,7 +1338,7 @@
 
   {#if !hasVisibleData}
     <div class="banner banner-info">
-      <span>Este navegador ainda esta vazio. Importe o backup antigo para restaurar seus dados.</span>
+      <span>Seu Google Drive ainda esta vazio. Importe um backup antigo para restaurar seus dados.</span>
       <button class="banner-action" onclick={() => (showBackup = true)}>Importar backup</button>
     </div>
   {/if}
@@ -2222,7 +2282,7 @@
         <section class="backup-section backup-section-import">
           <div class="backup-copy">
             <h3>Importar tudo</h3>
-            <p>Use o arquivo exportado pelo app para restaurar seus dados em outro navegador ou computador. Para migrar seus dados antigos, selecione data/IMPORTAR-MEUS-DADOS-ANTIGOS.json.</p>
+            <p>Use o arquivo exportado pelo app para restaurar seus dados no Google Drive. Para migrar seus dados antigos, selecione data/IMPORTAR-MEUS-DADOS-ANTIGOS.json.</p>
           </div>
           <form method="POST" action="?/importBackup" enctype="multipart/form-data" use:quickEnhance>
             <div class="form-group">
@@ -3002,7 +3062,68 @@
       </form>
 </Modal>
 
+{/if}
+
 <style>
+  .drive-entry {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      linear-gradient(135deg, rgba(225, 29, 72, 0.08), transparent 34%),
+      var(--bg);
+  }
+  .drive-entry-panel {
+    width: min(100%, 460px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .drive-entry-kicker {
+    color: var(--primary);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .drive-entry-panel h1 {
+    font-size: 1.7rem;
+    line-height: 1.2;
+    color: var(--text);
+  }
+  .drive-entry-panel p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+  }
+  .drive-entry-status,
+  .drive-entry-error {
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-size: 0.88rem;
+  }
+  .drive-entry-status {
+    background: var(--info-light);
+    color: var(--info-text);
+    border: 1px solid rgba(99, 102, 241, 0.22);
+  }
+  .drive-entry-error {
+    background: var(--danger-light);
+    color: var(--danger-text);
+    border: 1px solid rgba(239, 68, 68, 0.22);
+  }
+  .drive-entry-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
   /* ── Header ── */
   .header {
     background: var(--header-bg);

@@ -1,24 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { FinanceDataStore, STORAGE_KEY, type StorageLike } from './finance-data';
+import { FinanceDataStore } from './finance-data';
 
 function createStore() {
-  return new FinanceDataStore({ storage: null });
-}
-
-function createMemoryStorage(): StorageLike {
-  const values = new Map<string, string>();
-
-  return {
-    getItem(key) {
-      return values.get(key) ?? null;
-    },
-    setItem(key, value) {
-      values.set(key, value);
-    },
-    removeItem(key) {
-      values.delete(key);
-    }
-  };
+  return new FinanceDataStore();
 }
 
 describe('FinanceDataStore', () => {
@@ -210,15 +194,13 @@ describe('FinanceDataStore', () => {
     });
   });
 
-  it('persists state to browser-style storage', () => {
-    const storage = createMemoryStorage();
-    const first = new FinanceDataStore({ storage });
+  it('starts each in-memory store without browser persistence', () => {
+    const first = new FinanceDataStore();
     const month = first.getOrCreateMonth(7, 2026);
     first.addIncome(month.id, 'Salario', 3000);
 
-    const second = new FinanceDataStore({ storage });
+    const second = new FinanceDataStore();
 
-    expect(storage.getItem(STORAGE_KEY)).not.toBeNull();
-    expect(second.getMonthSummary(7, 2026).totalIncome).toBe(3000);
+    expect(second.getMonthSummary(7, 2026).totalIncome).toBe(0);
   });
 });

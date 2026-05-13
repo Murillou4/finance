@@ -43,7 +43,7 @@ You can preview the production build with `npm run preview`.
 
 ## Client-only + GitHub Pages
 
-This app now runs entirely in the browser. Data is stored locally in the current browser and can be moved between browsers with the Backup modal.
+This app now runs entirely in the browser, but financial data is stored in the user's Google Drive app data folder. The app requires a Google Drive connection before loading the finance UI.
 
 The old SQLite data was exported to a private ignored file:
 
@@ -51,7 +51,7 @@ The old SQLite data was exported to a private ignored file:
 data/IMPORTAR-MEUS-DADOS-ANTIGOS.json
 ```
 
-To restore it, open the app, go to Backup, choose that JSON file, check the replace confirmation, and import. Do not move this file to `static/` or commit it, because that would publish your financial data.
+To restore it, connect Google Drive, go to Backup, choose that JSON file, check the replace confirmation, and import. Do not move this file to `static/` or commit it, because that would publish your financial data.
 
 For GitHub Pages project deployments, build with the repository name as `BASE_PATH`:
 

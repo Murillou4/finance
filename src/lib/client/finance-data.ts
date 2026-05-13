@@ -1,5 +1,3 @@
-export const STORAGE_KEY = 'finance:data:v1';
-
 const BACKUP_TABLES = [
   'categories',
   'months',
@@ -12,12 +10,6 @@ const BACKUP_TABLES = [
 ] as const;
 
 type BackupTable = (typeof BACKUP_TABLES)[number];
-
-export interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem?(key: string): void;
-}
 
 export interface Category {
   id: number;
@@ -241,13 +233,10 @@ export function createEmptyMonthSummary(month: number, year: number): MonthSumma
 
 export class FinanceDataStore {
   private state: FinanceState;
-  private storage: StorageLike | null;
   public onDataChanged?: () => void;
 
-  constructor(options: { storage?: StorageLike | null; state?: FinanceState } = {}) {
-    this.storage = options.storage ?? getBrowserStorage();
-    this.state = normalizeState(options.state ?? loadState(this.storage));
-    this.save();
+  constructor(options: { state?: FinanceState } = {}) {
+    this.state = normalizeState(options.state ?? createInitialState());
   }
 
   getSnapshot() {
@@ -806,10 +795,10 @@ export class FinanceDataStore {
     };
   }
 
-  importBackupData(payload: unknown) {
+  importBackupData(payload: unknown, options: { preserveTimestamp?: boolean } = {}) {
     const backup = parseBackupPayload(payload);
     this.state = normalizeState(backup.data, { seedDefaultCategories: false });
-    this.save(true);
+    this.save(!!options.preserveTimestamp);
 
     const totalRecords = BACKUP_TABLES.reduce((sum, table) => sum + this.state[table].length, 0);
 
@@ -854,26 +843,7 @@ export class FinanceDataStore {
     if (!isImport) {
       this.state.last_modified = new Date().toISOString();
     }
-    this.storage?.setItem(STORAGE_KEY, JSON.stringify(this.state));
     this.onDataChanged?.();
-  }
-}
-
-function getBrowserStorage() {
-  if (typeof localStorage === 'undefined') return null;
-  return localStorage;
-}
-
-function loadState(storage: StorageLike | null): FinanceState {
-  if (!storage) return createInitialState();
-
-  const raw = storage.getItem(STORAGE_KEY);
-  if (!raw) return createInitialState();
-
-  try {
-    return JSON.parse(raw) as FinanceState;
-  } catch {
-    return createInitialState();
   }
 }
 

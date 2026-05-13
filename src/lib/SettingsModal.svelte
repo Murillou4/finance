@@ -25,15 +25,17 @@
   let driveStatus = $state<DriveSyncStatus>({ connected: false, isSyncing: false });
 
   $effect(() => {
-    if (open && finance) {
-      settings = finance.getSettings();
-      if (typeof Notification !== "undefined") {
-        permissionState = Notification.permission;
-      }
-      driveSync.setListener((status) => {
-        driveStatus = status;
-      });
+    if (!open || !finance) return;
+
+    settings = finance.getSettings();
+    if (typeof Notification !== "undefined") {
+      permissionState = Notification.permission;
     }
+    const unsubscribe = driveSync.setListener((status) => {
+      driveStatus = status;
+    });
+
+    return () => unsubscribe();
   });
 
   function commitField<K extends keyof FinanceSettings>(key: K, value: FinanceSettings[K]) {
@@ -152,7 +154,7 @@
       <section>
         <h3>Sincronização com Google Drive</h3>
         <p class="hint">
-          Salva seus dados automaticamente na sua conta do Google Drive em tempo real.
+          Seus dados ficam no Google Drive e sao sincronizados automaticamente.
         </p>
         {#if driveStatus.connected}
           <div class="drive-status-block">
@@ -193,15 +195,15 @@
               <button
                 class="btn btn-warning btn-sm"
                 disabled={driveStatus.isSyncing}
-                title="Apaga o arquivo no Drive e envia todos os dados locais do zero. Use se os dados não estão sincronizando."
+                title="Apaga o arquivo no Drive e envia os dados desta sessao do zero. Use se os dados nao estao sincronizando."
                 onclick={async () => {
                   if (!finance) return;
-                  if (confirm('Isso vai substituir TODOS os dados no Google Drive pelos dados deste navegador. Continuar?')) {
+                  if (confirm('Isso vai substituir TODOS os dados no Google Drive pelos dados desta sessao. Continuar?')) {
                     await driveSync.resetAndUpload(finance.exportBackupData());
                   }
                 }}
               >
-                ⚠ Forçar envio local → Drive
+                Forcar envio sessao -> Drive
               </button>
               <button class="btn btn-danger btn-sm" onclick={() => driveSync.disconnect()}>
                 Desconectar
@@ -213,7 +215,7 @@
             Conectar com Google Drive
           </button>
           <p class="hint" style="margin-top: 6px;">
-            Ao conectar, seus dados locais serão sincronizados automaticamente.
+            A conexao com Drive e obrigatoria para carregar o app.
           </p>
         {/if}
       </section>

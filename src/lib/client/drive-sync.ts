@@ -1,7 +1,6 @@
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const BACKUP_FILENAME = 'finance-backup.json';
-const CONNECTED_FLAG_KEY = 'finance:drive_connected';
 
 export interface DriveSyncStatus {
   connected: boolean;
@@ -16,7 +15,6 @@ export type SyncEvent =
   | { type: 'sync_success'; lastSync: Date }
   | { type: 'sync_error'; error: string }
   | { type: 'drive_data_loaded' }
-  | { type: 'local_data_uploaded' }
   | { type: 'connected'; userEmail?: string }
   | { type: 'disconnected' };
 
@@ -25,7 +23,7 @@ class DriveSyncService {
   private accessToken: string | null = null;
   private tokenExpiresAt: number = 0;
   private syncStatus: DriveSyncStatus = { connected: false, isSyncing: false };
-  private onStatusChange?: (status: DriveSyncStatus) => void;
+  private statusListeners = new Set<(status: DriveSyncStatus) => void>();
   private onSyncEvent?: (event: SyncEvent) => void;
   public onConnect?: () => Promise<void>;
   private debounceTimer: any = null;
@@ -34,18 +32,18 @@ class DriveSyncService {
   private syncInProgress = false;
   private pendingUpload: any = null;
 
-  constructor() {
-    // Não salvamos o token — apenas o flag de que o usuário autorizou.
-    // O silent refresh acontece no init().
-  }
-
   getStatus() {
     return this.syncStatus;
   }
 
+  isConfigured() {
+    return !!CLIENT_ID;
+  }
+
   setListener(cb: (status: DriveSyncStatus) => void) {
-    this.onStatusChange = cb;
+    this.statusListeners.add(cb);
     cb(this.syncStatus);
+    return () => this.statusListeners.delete(cb);
   }
 
   setSyncEventListener(cb: (event: SyncEvent) => void) {
@@ -59,6 +57,7 @@ class DriveSyncService {
   async init() {
     if (!CLIENT_ID) {
       console.warn('[DriveSync] VITE_GOOGLE_CLIENT_ID não configurado. Sincronização com Drive desabilitada.');
+      this.updateStatus({ connected: false, error: 'Google Drive nao configurado.' });
       return;
     }
 
@@ -88,7 +87,7 @@ class DriveSyncService {
             console.log('[DriveSync] Silent refresh falhou — usuário precisa reconectar manualmente.');
             this._clearConnection();
           } else {
-            this.updateStatus({ error: 'Erro ao obter permissão do Google.' });
+            this.updateStatus({ connected: false, error: 'Erro ao obter permissao do Google.' });
           }
           return;
         }
@@ -107,8 +106,7 @@ class DriveSyncService {
         this.tokenExpiresAt = Date.now() + (response.expires_in ?? 3600) * 1000 - 60_000; // 1min de margem
 
         if (!wasSilentRefresh) {
-          // Conexão nova (com popup) — salvar flag e chamar onConnect
-          localStorage.setItem(CONNECTED_FLAG_KEY, '1');
+          // Conexão nova (com popup): carregar dados do Drive.
           this.updateStatus({ connected: true, error: undefined });
           this.emitEvent({ type: 'connected' });
           await this.onConnect?.();
@@ -135,13 +133,6 @@ class DriveSyncService {
         console.error('[DriveSync] Erro ao carregar GAPI Drive', e);
       }
 
-      // Após GAPI carregar, tentar silent refresh se usuário tinha conexão anterior
-      if (localStorage.getItem(CONNECTED_FLAG_KEY) === '1') {
-        console.log('[DriveSync] Flag de conexão encontrada. Tentando silent refresh...');
-        this.updateStatus({ connected: true }); // otimismo — corrigimos se falhar
-        this._doSilentRefresh();
-      }
-
       resolve();
     });
   }
@@ -155,6 +146,10 @@ class DriveSyncService {
 
   async connect() {
     console.log('[DriveSync] Iniciando conexão com popup...');
+    if (!CLIENT_ID) {
+      this.updateStatus({ connected: false, error: 'Google Drive nao configurado.' });
+      return;
+    }
     if (!this.tokenClient) await this.init();
     if (this.tokenClient) {
       this.tokenClient.requestAccessToken({ prompt: 'consent' });
@@ -178,13 +173,14 @@ class DriveSyncService {
     this.accessToken = null;
     this.tokenExpiresAt = 0;
     this.firstSyncDone = false;
-    localStorage.removeItem(CONNECTED_FLAG_KEY);
     this.updateStatus({ connected: false, userEmail: undefined, error: undefined });
   }
 
   private updateStatus(patch: Partial<DriveSyncStatus>) {
     this.syncStatus = { ...this.syncStatus, ...patch };
-    this.onStatusChange?.(this.syncStatus);
+    for (const listener of this.statusListeners) {
+      listener(this.syncStatus);
+    }
   }
 
   /** Verifica se o token atual ainda é válido */
@@ -199,8 +195,8 @@ class DriveSyncService {
   private async ensureValidToken(): Promise<boolean> {
     if (this.isTokenValid()) return true;
 
-    if (!this.accessToken && !localStorage.getItem(CONNECTED_FLAG_KEY)) {
-      console.log('[DriveSync] Sem token e sem flag de conexão. Abortando.');
+    if (!this.accessToken) {
+      console.log('[DriveSync] Sem token de conexão. Abortando.');
       return false;
     }
 
@@ -353,7 +349,7 @@ class DriveSyncService {
     const hasToken = await this.ensureValidToken();
     if (!hasToken) {
       console.log('[DriveSync] Download cancelado: token inválido ou refresh iniciado.');
-      return null;
+      throw new Error('Conexao com Google Drive expirada. Conecte novamente.');
     }
 
     try {
@@ -374,10 +370,10 @@ class DriveSyncService {
           console.warn('[DriveSync] 401 no download. Token expirado.');
           this.accessToken = null;
           this._doSilentRefresh();
-        } else {
-          console.error('[DriveSync] Erro no download:', response.status);
         }
-        return null;
+        const err: any = new Error(`Erro ao baixar backup do Drive: ${response.status}`);
+        err.status = response.status;
+        throw err;
       }
 
       const data = await response.json();
@@ -385,7 +381,7 @@ class DriveSyncService {
       return data;
     } catch (e) {
       console.error('[DriveSync] Falha no download:', e);
-      return null;
+      throw e instanceof Error ? e : new Error('Falha ao baixar backup do Drive.');
     }
   }
 
@@ -398,10 +394,12 @@ class DriveSyncService {
       );
 
       if (!response.ok) {
+        const err: any = new Error(`Erro ao buscar backup no Drive: ${response.status}`);
+        err.status = response.status;
         if (response.status === 401) {
           this.accessToken = null;
         }
-        return null;
+        throw err;
       }
 
       const data = await response.json();
@@ -410,13 +408,13 @@ class DriveSyncService {
       return id;
     } catch (e) {
       console.error('[DriveSync] Erro ao buscar arquivo:', e);
-      return null;
+      throw e instanceof Error ? e : new Error('Falha ao buscar backup no Drive.');
     }
   }
 
   /** Retorna true se o usuário tinha conexão salva (mesmo que o token ainda não foi refreshado) */
   wasConnected(): boolean {
-    return localStorage.getItem(CONNECTED_FLAG_KEY) === '1';
+    return this.syncStatus.connected;
   }
 
   /** Deleta o arquivo de backup do Drive (para forçar re-upload limpo) */
@@ -442,7 +440,7 @@ class DriveSyncService {
     }
   }
 
-  /** Força upload imediato dos dados locais, deletando o arquivo antigo antes */
+  /** Força upload imediato dos dados da sessão, deletando o arquivo antigo antes */
   async resetAndUpload(data: any): Promise<void> {
     this.updateStatus({ isSyncing: true, error: undefined });
     this.emitEvent({ type: 'sync_start' });
