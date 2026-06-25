@@ -158,4 +158,40 @@
     color: var(--text-muted);
     margin: -4px 0 0;
   }
+
+  @media (max-width: 760px) {
+    .analysis-body {
+      gap: 14px;
+    }
+    .sub-tabs {
+      gap: 8px;
+      margin: -2px -16px 2px;
+      padding: 0 16px 6px;
+      border-bottom: 0;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .sub-tabs::-webkit-scrollbar {
+      display: none;
+    }
+    .sub-tab {
+      min-height: 38px;
+      padding: 8px 11px;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      scroll-snap-align: start;
+    }
+    .sub-tab.active {
+      background: var(--primary-light);
+      border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+      border-bottom-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+    }
+    section h3 {
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+    }
+  }
 </style>

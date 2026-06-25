@@ -118,4 +118,24 @@
     }
     .values { display: none; }
   }
+
+  @media (max-width: 760px) {
+    .row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      padding: 9px 10px;
+      gap: 7px;
+    }
+    .diff {
+      min-width: 0;
+    }
+    .pct {
+      min-width: 0;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .pct {
+      display: none;
+    }
+  }
 </style>

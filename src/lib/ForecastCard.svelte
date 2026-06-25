@@ -146,4 +146,36 @@
   .mono {
     font-variant-numeric: tabular-nums;
   }
+
+  @media (max-width: 760px) {
+    .head,
+    .balance,
+    .row {
+      align-items: flex-start;
+    }
+    .head,
+    .balance {
+      flex-direction: column;
+    }
+    .month {
+      display: block;
+      margin-top: 2px;
+      line-height: 1.25;
+    }
+    .tag {
+      width: fit-content;
+    }
+    .b-value {
+      font-size: 1.24rem;
+      line-height: 1.15;
+      word-break: break-word;
+    }
+    .row {
+      gap: 12px;
+      line-height: 1.35;
+    }
+    .row span:last-child {
+      text-align: right;
+    }
+  }
 </style>

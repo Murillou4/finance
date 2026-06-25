@@ -352,4 +352,61 @@
     .metrics-panel { grid-template-columns: 1fr; }
     .metric-wide { grid-column: span 1; }
   }
+
+  @media (max-width: 760px) {
+    .metrics-panel {
+      display: flex;
+      gap: 10px;
+      margin: 0 -12px 16px;
+      padding: 0 12px 5px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .metrics-panel::-webkit-scrollbar {
+      display: none;
+    }
+    .metric,
+    .metric-wide {
+      flex: 0 0 min(84vw, 330px);
+      grid-column: auto;
+      scroll-snap-align: start;
+      border-radius: 12px;
+      padding: 13px 14px;
+      box-shadow: none;
+    }
+    .metric:hover {
+      transform: none;
+      box-shadow: none;
+    }
+    .metric-head {
+      align-items: flex-start;
+    }
+    .metric-label {
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+      line-height: 1.25;
+    }
+    .metric-tag {
+      max-width: 48%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .metric-value {
+      font-size: 1.32rem;
+      line-height: 1.15;
+      word-break: break-word;
+    }
+    .metric-foot {
+      gap: 8px;
+      line-height: 1.35;
+    }
+    .legend {
+      gap: 6px 8px;
+    }
+    .debt-bars {
+      height: 54px;
+    }
+  }
 </style>

@@ -4109,4 +4109,450 @@
       margin: 0 auto;
     }
   }
+
+  @media (max-width: 760px) {
+    .drive-entry {
+      min-height: 100dvh;
+      align-items: end;
+      padding: 16px;
+    }
+    .drive-entry-panel {
+      width: 100%;
+      padding: 22px 18px 20px;
+      border-radius: 20px;
+    }
+    .drive-entry-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .drive-entry-actions .btn-primary {
+      width: 100%;
+    }
+
+    .header {
+      padding: 0 12px;
+    }
+    .header-inner {
+      height: auto;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 9px;
+      padding: 10px 0 8px;
+    }
+    .logo {
+      font-size: 1.05rem;
+      line-height: 1;
+    }
+    .month-nav {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 0 2px 5px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .month-nav::-webkit-scrollbar {
+      display: none;
+    }
+    .month-selector {
+      order: -1;
+      flex: 0 0 100%;
+      justify-content: space-between;
+      padding: 4px;
+      border-radius: 14px;
+    }
+    .month-label {
+      min-width: 0;
+      flex: 1;
+      font-size: 0.95rem;
+      padding: 0 6px;
+    }
+    .btn-nav {
+      width: 38px;
+      height: 38px;
+      font-size: 1rem;
+    }
+    .btn-today {
+      height: 34px;
+      margin-left: 0;
+      padding: 0 10px;
+      background: var(--surface);
+    }
+    .header-icon-btn,
+    .drive-badge,
+    .header-action {
+      flex: 0 0 auto;
+      height: 36px;
+      border-radius: 10px;
+    }
+    .header-action {
+      padding: 0 12px;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+    .drive-badge {
+      padding: 0 10px;
+    }
+
+    .main {
+      max-width: none;
+      padding: 14px 12px calc(92px + env(safe-area-inset-bottom));
+    }
+    .banner,
+    .due-banner {
+      margin-bottom: 12px;
+      border-radius: 12px;
+    }
+    .banner-info {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .banner-action {
+      min-height: 38px;
+    }
+    .due-banner {
+      padding: 12px;
+    }
+    .due-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+    .due-chip {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats-bar {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-card {
+      min-height: 104px;
+      padding: 12px;
+      border-radius: 12px;
+      box-shadow: none;
+    }
+    .stat-card:hover {
+      transform: none;
+      box-shadow: none;
+    }
+    .stat-card-hero {
+      grid-column: 1 / -1;
+      min-height: 0;
+      padding: 16px;
+    }
+    .stat-value {
+      font-size: 1.2rem;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      word-break: break-word;
+    }
+    .stat-value-hero {
+      font-size: 1.9rem;
+    }
+    .stat-label {
+      font-size: 0.66rem;
+      letter-spacing: 0.04em;
+    }
+    .stat-icon {
+      width: 20px;
+      height: 20px;
+    }
+    .stat-delta {
+      font-size: 0.72rem;
+      line-height: 1.3;
+    }
+
+    .dashboard-grid,
+    .col {
+      gap: 14px;
+    }
+    .side-grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .expenses-card {
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      overflow: visible;
+    }
+    .expenses-card:hover {
+      box-shadow: none;
+    }
+    .tab-bar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+      padding: 0;
+      margin-bottom: 10px;
+      border-bottom: 0;
+      background: transparent;
+    }
+    .tab-btn {
+      min-width: 0;
+      min-height: 64px;
+      padding: 10px;
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: var(--surface);
+      box-shadow: none;
+    }
+    .tab-btn:hover {
+      transform: none;
+    }
+    .tab-btn.active {
+      border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+      box-shadow: 0 8px 18px rgba(225, 29, 72, 0.09);
+    }
+    .tab-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.03em;
+    }
+    .tab-total {
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.78rem;
+    }
+    .tab-actions {
+      grid-column: 1 / -1;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .tab-actions .btn {
+      width: 100%;
+    }
+    .tab-pane .card-body {
+      overflow: visible;
+    }
+    .empty-state {
+      padding: 30px 16px;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+    }
+
+    .expenses-card table,
+    .expenses-card tbody,
+    .expenses-card tr,
+    .expenses-card td {
+      display: block;
+      width: 100%;
+    }
+    .expenses-card thead {
+      display: none;
+    }
+    .expenses-card tbody {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .expenses-card tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 9px 12px;
+      padding: 13px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .expenses-card tr:hover td {
+      background: transparent;
+    }
+    .expenses-card td {
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      font-size: 0.88rem;
+    }
+    .expenses-card td:not(:first-child):not(:nth-child(2)):not(:last-child) {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .expenses-card td:not(:first-child):not(:nth-child(2)):not(:last-child)::before {
+      content: "";
+      flex: 0 0 auto;
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .expenses-card td:empty {
+      display: none;
+    }
+    .expenses-card td:first-child {
+      grid-column: 2;
+      grid-row: 1;
+      align-self: start;
+      justify-self: end;
+      width: auto;
+    }
+    .expenses-card td:nth-child(2) {
+      grid-column: 1;
+      grid-row: 1;
+      align-self: center;
+      padding-right: 4px;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 0.98rem;
+      font-weight: 700;
+      line-height: 1.25;
+      text-wrap: pretty;
+    }
+    .expenses-card td:last-child {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: flex-end;
+      padding-top: 5px;
+      border-top: 1px solid var(--border-light);
+    }
+    .expenses-card td:last-child::before,
+    .expenses-card td:first-child::before,
+    .expenses-card td:nth-child(2)::before {
+      display: none;
+    }
+    .expenses-card .row-actions {
+      gap: 6px;
+    }
+    .expenses-card .badge,
+    .expenses-card .pay-badge {
+      max-width: 58%;
+      justify-content: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .expenses-card .checkbox-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+    }
+
+    .tab-pane[aria-label="Despesas Fixas"] td:nth-child(3)::before { content: "Tipo"; }
+    .tab-pane[aria-label="Despesas Fixas"] td:nth-child(4)::before { content: "Categoria"; }
+    .tab-pane[aria-label="Despesas Fixas"] td:nth-child(5)::before { content: "Valor"; }
+    .tab-pane[aria-label="Despesas Fixas"] td:nth-child(6)::before { content: "Pagamento"; }
+
+    .tab-pane[aria-label="Despesas Mensais"] td:nth-child(3)::before { content: "Data"; }
+    .tab-pane[aria-label="Despesas Mensais"] td:nth-child(4)::before { content: "Categoria"; }
+    .tab-pane[aria-label="Despesas Mensais"] td:nth-child(5)::before { content: "Valor"; }
+    .tab-pane[aria-label="Despesas Mensais"] td:nth-child(6)::before { content: "Pagamento"; }
+
+    .tab-pane[aria-label="Cartão de Crédito"] td:nth-child(3)::before { content: "Parcelas"; }
+    .tab-pane[aria-label="Cartão de Crédito"] td:nth-child(4)::before { content: "Data"; }
+    .tab-pane[aria-label="Cartão de Crédito"] td:nth-child(5)::before { content: "Categoria"; }
+    .tab-pane[aria-label="Cartão de Crédito"] td:nth-child(6)::before { content: "Valor"; }
+    .tab-pane[aria-label="Cartão de Crédito"] td:nth-child(7)::before { content: "Pagamento"; }
+
+    .compact-row {
+      padding: 12px 14px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .compact-name {
+      white-space: normal;
+      line-height: 1.25;
+    }
+    .compact-actions {
+      width: 100%;
+      justify-content: flex-end;
+    }
+    .payment-type-bars {
+      gap: 14px;
+    }
+
+    .backup-section {
+      gap: 12px;
+      padding: 14px;
+    }
+    .backup-section .btn,
+    .backup-section form,
+    .backup-section-import .modal-footer {
+      width: 100%;
+    }
+    .cat-layout {
+      grid-template-columns: 1fr;
+      padding: 16px;
+    }
+    .cat-chart-wrap {
+      max-width: 220px;
+      margin: 0 auto;
+    }
+    .cat-grid {
+      grid-template-columns: 1fr;
+    }
+    .cat-card-bottom {
+      align-items: flex-start;
+      gap: 8px;
+      flex-direction: column;
+    }
+    .cat-budget-form,
+    .cat-budget-input {
+      width: 100%;
+    }
+
+    .toast-container {
+      left: 12px;
+      right: 12px;
+      bottom: calc(86px + env(safe-area-inset-bottom));
+    }
+    .toast {
+      width: 100%;
+      max-width: none;
+    }
+
+    .fab-wrap {
+      right: 14px;
+      bottom: calc(14px + env(safe-area-inset-bottom));
+    }
+    .fab-btn {
+      width: 58px;
+      height: 58px;
+      box-shadow: 0 10px 26px rgba(225, 29, 72, 0.32);
+    }
+    .fab-menu {
+      min-width: min(82vw, 280px);
+      border-radius: 14px;
+    }
+    .fab-item {
+      min-height: 46px;
+      padding: 12px 14px;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .stats-bar {
+      grid-template-columns: 1fr;
+    }
+    .stat-card-hero {
+      grid-column: span 1;
+    }
+    .tab-label {
+      font-size: 0.68rem;
+    }
+    .tab-total {
+      font-size: 0.72rem;
+    }
+  }
 </style>

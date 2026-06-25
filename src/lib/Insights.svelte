@@ -137,4 +137,33 @@
     font-size: 0.8rem;
     color: var(--text-secondary);
   }
+
+  @media (max-width: 760px) {
+    .insights {
+      margin-bottom: 14px;
+      padding: 12px;
+      border-radius: 12px;
+      box-shadow: none;
+    }
+    .insights-head {
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .insights-toggle {
+      flex: 0 0 auto;
+    }
+    .insight {
+      padding: 10px;
+      gap: 10px;
+      border-radius: 10px;
+    }
+    .insight-title {
+      font-size: 0.86rem;
+      line-height: 1.35;
+    }
+    .insight-detail {
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+  }
 </style>

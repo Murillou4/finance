@@ -444,4 +444,73 @@
     .rule { grid-template-columns: 1fr auto auto; }
     .rule .arrow { display: none; }
   }
+
+  @media (max-width: 760px) {
+    .settings-body {
+      gap: 18px;
+    }
+    section {
+      gap: 9px;
+    }
+    .row {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .num-input {
+      width: 100%;
+    }
+    .toggle {
+      align-items: flex-start;
+      line-height: 1.35;
+    }
+    .drive-status-block {
+      padding: 12px;
+      border-radius: 12px;
+    }
+    .drive-status-row {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .status-text {
+      min-width: 0;
+      line-height: 1.3;
+    }
+    .sync-pill {
+      width: fit-content;
+    }
+    .drive-actions {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .drive-actions .btn {
+      width: 100%;
+      white-space: normal;
+    }
+    .add-rule {
+      grid-template-columns: 1fr;
+    }
+    .rule {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 10px;
+    }
+    .rule .arrow {
+      display: none;
+    }
+    .kw,
+    .cat {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cat {
+      grid-column: 1 / -1;
+    }
+    .rule .btn-icon {
+      grid-column: 2;
+      grid-row: 1;
+    }
+  }
 </style>

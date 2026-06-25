@@ -121,13 +121,21 @@
 
   @media (max-width: 640px) {
     .row {
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr;
       gap: 8px;
     }
     .vals {
-      grid-column: 1 / -1;
       flex-direction: row;
       justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .row .btn {
+      width: 100%;
+    }
+    .name {
+      white-space: normal;
+      line-height: 1.25;
     }
   }
 </style>

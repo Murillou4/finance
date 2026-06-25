@@ -148,4 +148,26 @@
   }
   .positive { color: var(--success); }
   .negative { color: var(--danger); }
+
+  @media (max-width: 760px) {
+    .net-worth-full {
+      padding: 12px;
+      border-radius: 12px;
+      box-shadow: none;
+    }
+    .header,
+    .footer {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .value {
+      font-size: 1rem;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .footer {
+      font-size: 0.72rem;
+    }
+  }
 </style>

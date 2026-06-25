@@ -53,4 +53,12 @@
   .modal-lg {
     max-width: 720px;
   }
+
+  @media (max-width: 720px) {
+    .modal-sm,
+    .modal-md,
+    .modal-lg {
+      max-width: none;
+    }
+  }
 </style>

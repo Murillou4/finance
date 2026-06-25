@@ -244,4 +244,91 @@
     color: var(--danger-text);
     border: 1px solid rgba(239, 68, 68, 0.22);
   }
+
+  @media (max-width: 760px) {
+    .bulk {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      background: var(--surface-hover);
+    }
+    .bulk-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .table-wrap {
+      max-height: none;
+      overflow: visible;
+      border: 0;
+      border-radius: 0;
+    }
+    .ofx-table,
+    .ofx-table tbody,
+    .ofx-table tr,
+    .ofx-table td {
+      display: block;
+      width: 100%;
+    }
+    .ofx-table thead {
+      display: none;
+    }
+    .ofx-table tbody {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ofx-table tr {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 9px 12px;
+      padding: 12px;
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .ofx-table td {
+      padding: 0;
+      border: 0;
+    }
+    .ofx-table td:nth-child(1) {
+      grid-column: 1;
+      grid-row: 1;
+      width: auto;
+      align-self: center;
+    }
+    .ofx-table td:nth-child(2) {
+      grid-column: 2;
+      grid-row: 1;
+      align-self: center;
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+    .ofx-table td:nth-child(n + 3) {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .ofx-table td:nth-child(n + 3)::before {
+      color: var(--text-muted);
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .ofx-table td:nth-child(3)::before { content: "Descrição"; }
+    .ofx-table td:nth-child(4)::before { content: "Categoria"; }
+    .ofx-table td:nth-child(5)::before { content: "Valor"; }
+    .row-input {
+      min-height: 42px;
+      font-size: 0.92rem;
+    }
+    .num {
+      text-align: left;
+      font-weight: 700;
+    }
+  }
 </style>

@@ -161,5 +161,16 @@
   @media (max-width: 640px) {
     .controls { grid-template-columns: 1fr; }
     .results { grid-template-columns: 1fr 1fr; }
+    .slider-wrap {
+      min-height: 44px;
+    }
+    .r-value {
+      line-height: 1.15;
+      word-break: break-word;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .results { grid-template-columns: 1fr; }
   }
 </style>

@@ -165,4 +165,25 @@
     border-radius: 100px;
     transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
+
+  @media (max-width: 760px) {
+    .row {
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 9px;
+    }
+    .info-top,
+    .info-bottom {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .name {
+      white-space: normal;
+      line-height: 1.25;
+    }
+    .value,
+    .share {
+      align-self: flex-end;
+    }
+  }
 </style>
